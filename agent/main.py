@@ -4,13 +4,18 @@ from agent import LangGraphAgent
 
 def main():
     """Run the agent with a command."""
-    # Example command
+    # Example: Simulating data from Logitech plugin
+    # In real usage, this would come from the plugin
     command_data = {
-        "text": "create a meeting for tuesday 13:00 and send the link to aircode610@gmail.com"
+        "command": "create a meeting for tuesday 13:00 and send the link to aircode610@gmail.com",
+        "feedback": "Duration: 1 hour",  # User's additional feedback
+        "app": "Slack"  # App where the text was selected
     }
     
-    # Extract the command text
-    command = command_data.get("text", "")
+    # Extract the data
+    command = command_data.get("command", "")
+    feedback = command_data.get("feedback")
+    app = command_data.get("app")
     
     if not command:
         print("No command provided!")
@@ -18,7 +23,7 @@ def main():
     
     # Initialize and run the agent
     agent = LangGraphAgent()
-    result = agent.run(command)
+    result = agent.run(command, feedback=feedback, app=app)
     
     # Print final state
     print(f"\n{'='*50}")

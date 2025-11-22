@@ -14,7 +14,9 @@ load_dotenv(override=True)  # override=True ensures env vars are loaded even if 
 # Define state as TypedDict for LangGraph
 class AgentState(TypedDict):
     """The state of the agent throughout execution."""
-    command: str
+    command: str  # The selected text/command from the user
+    feedback: Optional[str]  # Additional user feedback/context
+    app: Optional[str]  # The app name where the command came from (e.g., "Slack", "Email")
     plan: List[Dict[str, Any]]
     current_step_id: Optional[int]
     completed: bool
@@ -62,26 +64,59 @@ class LangGraphAgent:
         ]
         self.graph = self._build_graph()
     
+    def _get_system_prompt(self, app: Optional[str] = None) -> str:
+        """Generate system prompt with optional app context."""
+        base_prompt = """You are an intelligent assistant that helps users execute tasks based on text they select from their applications. 
+
+Your role:
+- You receive a command (selected text) and optional feedback from the user
+- You plan and execute the task step-by-step using available MCP tools
+- You consider the context of where the command came from (the application)
+- You combine the command and feedback to understand the complete intent
+- You execute tasks efficiently and accurately"""
+
+        # Add app context if provided (let LLM interpret the app context)
+        if app:
+            base_prompt += f"""
+
+Context: The command came from the application "{app}". Consider the typical use case and context of this application when interpreting the command and planning the execution."""
+        
+        return base_prompt
+    
     @traceable(name="plan_phase")
     def plan_phase(self, state: AgentState) -> AgentState:
         """Phase 1: Plan the steps needed to accomplish the command."""
         validation_feedback = state.get("validation_feedback")
         iteration = state.get("planning_iterations", 0) + 1
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
+        
+        # Get system prompt with app context
+        system_prompt = self._get_system_prompt(app)
         
         # Build planning prompt with feedback if this is a refinement
-        feedback_section = ""
+        validation_section = ""
         if validation_feedback:
-            feedback_section = f"""
+            validation_section = f"""
 
 IMPORTANT: Previous validation found issues with the plan. Please address these:
 {validation_feedback}
 
 Revise the plan to fix these issues."""
         
-        planning_prompt = f"""You need to break down this command into clear, executable steps: "{state['command']}"
+        # Combine command and feedback
+        user_input = command
+        if feedback:
+            user_input = f"Command: {command}\n\nAdditional feedback/context: {feedback}"
+        
+        planning_prompt = f"""{system_prompt}
+
+Task to execute:
+{user_input}
+{validation_section}
 
 You have access to MCP tools via the Zapier MCP server. The tool schemas (names, descriptions, parameters) are automatically available to you.
-{feedback_section}
 
 CRITICAL: Break down the task into ALL necessary intermediate steps. For example:
 - If creating a meeting and sending a link, you need: 1) Create meeting, 2) Get/retrieve the meeting link, 3) Send email with link
@@ -283,6 +318,10 @@ Now plan the steps for: "{state['command']}"
         # Update step status
         step["status"] = "in_progress"
         
+        # Get system prompt with app context
+        app = state.get("app")
+        system_prompt = self._get_system_prompt(app)
+        
         # Build the execution prompt
         context = state.get("execution_context", {})
         
@@ -333,7 +372,10 @@ Structured Output: [the full JSON/structured data returned by the tool]
             response = self.client.beta.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=2000,
-                messages=[{"role": "user", "content": execution_prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": execution_prompt}
+                ],
                 mcp_servers=self.mcp_servers,
                 betas=["mcp-client-2025-04-04"],
             )
@@ -376,11 +418,16 @@ Structured Output: [the full JSON/structured data returned by the tool]
     def validate_plan(self, state: AgentState) -> AgentState:
         """Validate the plan for missing steps, ambiguous items, and completeness."""
         plan = state.get("plan", [])
-        command = state["command"]
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
         
         if not plan:
             state["validation_feedback"] = "Plan is empty. Please create a plan with at least one step."
             return state
+        
+        # Get system prompt with app context
+        system_prompt = self._get_system_prompt(app)
         
         # Build validation prompt
         plan_summary = "\n".join([
@@ -388,7 +435,11 @@ Structured Output: [the full JSON/structured data returned by the tool]
             for s in plan
         ])
         
-        validation_prompt = f"""Review this plan for the command: "{command}"
+        user_input = command
+        if feedback:
+            user_input = f"Command: {command}\nAdditional feedback: {feedback}"
+        
+        validation_prompt = f"""Review this plan for the task: "{user_input}"
 
 Current plan:
 {plan_summary}
@@ -417,7 +468,10 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
             response = self.client.beta.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1500,
-                messages=[{"role": "user", "content": validation_prompt}],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": validation_prompt}
+                ],
                 mcp_servers=self.mcp_servers,
                 betas=["mcp-client-2025-04-04"],
             )
@@ -525,11 +579,19 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         return workflow.compile()
     
     @traceable(name="run_agent")
-    def run(self, command: str) -> AgentState:
-        """Run the full agent workflow: discover tools -> plan -> execute."""
+    def run(self, command: str, feedback: Optional[str] = None, app: Optional[str] = None) -> AgentState:
+        """Run the full agent workflow: plan -> validate -> execute.
+        
+        Args:
+            command: The selected text/command from the user
+            feedback: Additional user feedback/context (e.g., meeting duration)
+            app: The app name where the command came from (e.g., "Slack", "Email")
+        """
         # Initialize state
         initial_state: AgentState = {
             "command": command,
+            "feedback": feedback,
+            "app": app,
             "plan": [],
             "current_step_id": None,
             "completed": False,
