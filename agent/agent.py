@@ -125,18 +125,29 @@ Guidelines:
 """
         
         try:
-            response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
+            # Use regular messages API (not beta) since we don't need MCP tools for summarization
+            response = self.client.messages.create(
+                model="claude-3-haiku-20240307",  # Using cheaper model for summarization
                 max_tokens=500,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": summarization_prompt}
                 ],
-                mcp_servers=self.mcp_servers,
-                betas=["mcp-client-2025-04-04"],
             )
             
-            summarized_command = response.content[0].text.strip()
+            # Extract text from response (handle both text blocks and direct text)
+            summarized_command = ""
+            if hasattr(response, 'content') and response.content:
+                for block in response.content:
+                    if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                        summarized_command += block.text
+                    elif hasattr(block, 'text'):  # Fallback for direct text attribute
+                        summarized_command += block.text
+            
+            if not summarized_command:
+                raise ValueError("No text content in response")
+            
+            summarized_command = summarized_command.strip()
             # Clean up the command (remove quotes if wrapped)
             if summarized_command.startswith('"') and summarized_command.endswith('"'):
                 summarized_command = summarized_command[1:-1]
@@ -153,6 +164,85 @@ Guidelines:
             # Keep original command if summarization fails
         
         return state
+    
+    @traceable(name="summarize_context")
+    def summarize_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Summarize the execution context to reduce token usage when it gets large."""
+        # Calculate total size of context
+        context_str = json.dumps(context, indent=2)
+        context_size = len(context_str)
+        
+        # Only summarize if context is getting large (>2000 chars)
+        if context_size < 2000:
+            return context
+        
+        print(f"Context is large ({context_size} chars), summarizing with cheaper model...")
+        
+        # Build a summary prompt
+        context_summary_prompt = f"""Summarize this execution context, preserving all critical information needed for subsequent steps:
+
+{context_str}
+
+Guidelines:
+- Preserve all structured data (IDs, links, keys, values) that might be needed for tool calls
+- Keep summaries concise but complete
+- Maintain references between steps (e.g., "step_1 result used in step_2")
+- Output a JSON object with the same structure but summarized content
+"""
+        
+        try:
+            # Use regular messages API (not beta) since we don't need MCP tools for summarization
+            response = self.client.messages.create(
+                model="claude-3-haiku-20240307",  # Using cheaper model for context summarization
+                max_tokens=2000,
+                system="You are a helpful assistant that summarizes execution context while preserving all critical data.",
+                messages=[
+                    {"role": "user", "content": context_summary_prompt}
+                ],
+            )
+            
+            # Extract text from response (handle both text blocks and direct text)
+            summary_text = ""
+            if hasattr(response, 'content') and response.content:
+                for block in response.content:
+                    if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                        summary_text += block.text
+                    elif hasattr(block, 'text'):  # Fallback for direct text attribute
+                        summary_text += block.text
+            
+            if not summary_text:
+                raise ValueError("No text content in response")
+            
+            summary_text = summary_text.strip()
+            
+            # Try to extract JSON from the response
+            json_match = re.search(r'\{.*\}', summary_text, re.DOTALL)
+            if json_match:
+                try:
+                    summarized_context = json.loads(json_match.group())
+                    print(f"✓ Context summarized: {len(context)} items -> {len(json.dumps(summarized_context))} chars")
+                    return summarized_context
+                except Exception as e:
+                    print(f"Warning: Failed to parse summarized context JSON: {e}")
+            
+            # Fallback: create a simplified context structure
+            summarized = {}
+            for key, value in context.items():
+                if isinstance(value, dict):
+                    # Keep structured output but summarize text
+                    summarized[key] = {
+                        "summary": value.get("summary", "")[:200] + "..." if len(value.get("summary", "")) > 200 else value.get("summary", ""),
+                        "structured_output": value.get("structured_output"),  # Keep full structured data
+                        "description": value.get("description", "")
+                    }
+                else:
+                    summarized[key] = str(value)[:200] + "..." if len(str(value)) > 200 else value
+            
+            return summarized
+            
+        except Exception as e:
+            print(f"Warning: Context summarization failed: {e}. Using original context.")
+            return context
     
     @traceable(name="plan_phase")
     def plan_phase(self, state: AgentState) -> AgentState:
@@ -603,6 +693,9 @@ ISSUES FOUND:
                         "structured_output": step.get("structured_output"),
                         "description": step.get("description", "")
                     }
+                    
+                    # Summarize context if it's getting large (after each addition)
+                    context = self.summarize_context(context)
                 
                 # If step failed, stop execution
                 if step.get("status") == "failed":
