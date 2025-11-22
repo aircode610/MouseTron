@@ -10,11 +10,11 @@ def main():
         "command": """
         
         Sara — 10:14 AM
-Hey! Quick task for you — could you put together a brief report on how RAG is being used in education research? Nothing too long, just key papers, methods, and examples.
+Hey! Quick task for you — could you put together a brief report on how RAG is being used in education research?
 Amirali — 10:15 AM
 Sure, I can do that. Any specific angle you want me to focus on?
 Sara — 10:16 AM
-Let’s keep it broad for now: applications in tutoring systems, assessment, personalization, that kind of thing. Just an overview.
+Let’s keep it simple for now.
 Amirali — 10:16 AM
 Got it. When do you need it?
 Sara — 10:17 AM

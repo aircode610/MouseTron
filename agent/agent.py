@@ -113,22 +113,15 @@ Context: The command came from the application "{app}". Consider the typical use
         # Get system prompt
         system_prompt = self._get_system_prompt(app)
         
-        summarization_prompt = f"""The user has selected text from {app if app else 'an application'} that may be a long conversation, chat history, or unclear command.
+        summarization_prompt = f"""Extract a clear, actionable command from this selected text:
 
-Selected text:
 {full_input}
 
-Your task is to analyze this text and extract/create a single, clear, actionable command that represents what the user wants to accomplish.
-
 Guidelines:
-- If it's a conversation/chat, extract the main task or request
-- If it's already a clear command, keep it as is (just clean it up if needed)
-- If it's unclear, infer the most likely intent based on the context
-- Output should be a single, concise command which also includes the main tasks to be accomplished
-- Focus on the actionable task, not the conversation context
-- Preserve important details like dates, times, emails, names, etc.
-
-Output ONLY the summarized command, nothing else. No explanations, no "The user wants to...", just the command itself.
+- Extract the main task from conversations/chats
+- Keep clear commands as-is (just clean up)
+- Preserve important details (dates, times, emails, names)
+- Output only the command, no explanations
 """
         
         try:
@@ -151,9 +144,9 @@ Output ONLY the summarized command, nothing else. No explanations, no "The user 
                 summarized_command = summarized_command[1:-1]
             
             print(f"Summarized command: {summarized_command[:100]}...")
-            # Update the command in state
+            # Update the command in state - this will be used for all subsequent phases
             state["command"] = summarized_command
-            print(f"DEBUG: Updated state command to: {state['command'][:100]}...")
+            print(f"✓ Command updated in state (length: {len(summarized_command)} chars)")
             
         except Exception as e:
             print(f"Warning: Summarization failed: {e}. Using original command.")
@@ -188,41 +181,37 @@ Revise the plan to fix these issues."""
         if feedback:
             user_input = f"Command: {command}\n\nAdditional feedback/context: {feedback}"
         
-        planning_prompt = f"""{system_prompt}
-
-Task to execute:
-{user_input}
+        planning_prompt = f"""Task: {user_input}
 {validation_section}
 
-You have access to MCP tools via the Zapier MCP server. The tool schemas (names, descriptions, parameters) are automatically available to you.
+You have access to MCP tools via Zapier. Tool schemas are automatically available.
 
-CRITICAL: Break down the task into ALL necessary intermediate steps. For example:
-- If creating a meeting and sending a link, you need: 1) Create meeting, 2) Get/retrieve the meeting link, 3) Send email with link
-- Don't skip steps that require getting information from a previous step's result
-- Each step should produce output that can be used by subsequent steps
+CRITICAL: Include ALL intermediate steps. Example: "create meeting and send link" needs:
+1. Create meeting
+2. Get meeting link (from step 1 result)
+3. Send email with link
 
-Based on the available tools above, plan the steps. Each step should:
-1. Be specific and actionable
-2. Use a single tool call per step
-3. Be broken down enough that one tool call can accomplish it
-4. Reference the exact tool name from the available tools list
-5. Include ALL intermediate steps (e.g., getting a link after creating something, retrieving data before using it)
+Each step should:
+- Be specific and actionable
+- Use one tool call
+- Reference exact tool name
+- Include intermediate steps (getting data from previous results)
 
-Return a JSON list of steps, each with:
-- id: sequential number starting from 1
-- description: what this step does (be very specific)
-- tool_name: the exact name of the tool to use (from the available tools list, or null if unsure)
-- tool_args: the arguments for the tool (if known, otherwise null)
+Return JSON list with:
+- id: sequential number
+- description: specific step description
+- tool_name: exact tool name (or null)
+- tool_args: tool arguments (or null)
 - status: "pending"
 
-Example format for "create meeting and send link":
+Example:
 [
-  {{"id": 1, "description": "Create a calendar event for Tuesday at 13:00", "tool_name": "create_calendar_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
-  {{"id": 2, "description": "Retrieve the meeting link from the created calendar event", "tool_name": "get_calendar_event_link", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
-  {{"id": 3, "description": "Send email to example@gmail.com with the meeting link", "tool_name": "send_email", "tool_args": {{"to": "example@gmail.com", "subject": "Meeting Link", "body": "Link from step 2"}}, "status": "pending"}}
+  {{"id": 1, "description": "Create calendar event for Tuesday 13:00", "tool_name": "create_calendar_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
+  {{"id": 2, "description": "Get meeting link from created event", "tool_name": "get_calendar_event_link", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
+  {{"id": 3, "description": "Send email with meeting link", "tool_name": "send_email", "tool_args": {{"to": "example@gmail.com", "body": "Link from step 2"}}, "status": "pending"}}
 ]
 
-Now plan the steps for: "{state['command']}"
+Plan steps for: "{command}"
 """
         
         response = self.client.beta.messages.create(
@@ -404,8 +393,18 @@ Now plan the steps for: "{state['command']}"
         # Build the execution prompt
         context = state.get("execution_context", {})
         
+        # Add feedback to context if available (important info might be there)
+        feedback = state.get("feedback")
+        command = state.get("command", "")
+        
         # Build comprehensive context string with structured data
         context_str = ""
+        # Add original command and feedback at the start
+        if feedback:
+            context_str += f"\n=== ORIGINAL CONTEXT ===\nCommand: {command}\nFeedback: {feedback}\n=== END ORIGINAL CONTEXT ===\n"
+        elif command:
+            context_str += f"\n=== ORIGINAL COMMAND ===\n{command}\n=== END ORIGINAL COMMAND ===\n"
+        
         if context:
             context_parts = []
             for key, value in context.items():
@@ -428,23 +427,18 @@ Now plan the steps for: "{state['command']}"
             if context_parts:
                 context_str = f"\n\n=== CONTEXT FROM PREVIOUS STEPS ===\n{chr(10).join(context_parts)}\n=== END CONTEXT ===\n"
         
-        execution_prompt = f"""Execute this step: {step['description']}
-
-You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
+        execution_prompt = f"""Execute: {step['description']}
 
 {context_str}
 
-Use the appropriate tool from the available tools above to accomplish this step. 
-- If a tool_name was specified in the plan, use that exact tool
-- If you need information from previous steps, use the structured output data provided in the context above
-- Extract specific values from the structured output (e.g., htmlLink, hangoutLink, id, event details, etc.) to use in this step
-- Make sure to use the correct tool name and provide all required parameters
+Instructions:
+- Use the tool specified in the plan (or appropriate tool if not specified)
+- Extract data from previous steps' structured output (e.g., htmlLink, hangoutLink, id)
+- Provide all required tool parameters
 
-IMPORTANT: After the tool executes, the response will include structured data. Please include that full structured output in your response so it can be used by subsequent steps.
-
-Format your response as:
-Summary: [brief description of what was done]
-Structured Output: [the full JSON/structured data returned by the tool]
+Response format:
+Summary: [what was done]
+Structured Output: [full JSON/structured data from tool]
 """
         
         try:
@@ -518,29 +512,25 @@ Structured Output: [the full JSON/structured data returned by the tool]
         if feedback:
             user_input = f"Command: {command}\nAdditional feedback: {feedback}"
         
-        validation_prompt = f"""Review this plan for the task: "{user_input}"
+        validation_prompt = f"""Review this plan for: "{user_input}"
 
-Current plan:
+Plan:
 {plan_summary}
 
-You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
-
 Check for:
-1. Missing intermediate steps (e.g., if creating something and then using its result, is there a step to retrieve/get that result?)
-2. Ambiguous steps that need more detail
-3. Steps that reference data from previous steps but don't show how to get that data
+1. Missing intermediate steps (e.g., getting a link after creating something)
+2. Ambiguous or unclear steps
+3. Steps referencing data without showing how to get it
 4. Missing tool assignments
-5. Logical gaps between steps
+5. Logical gaps
 
-If the plan is complete and all steps are clear, respond with: "APPROVED"
+If approved, respond: "APPROVED"
 
-If there are issues, respond with specific feedback in this format:
+If issues found, respond:
 ISSUES FOUND:
-- [Issue 1: specific problem and what step is affected]
-- [Issue 2: specific problem and what step is affected]
-- [Suggestion: what should be added or changed]
-
-Be thorough - catch missing intermediate steps like getting a link after creating a meeting, retrieving data before using it, etc.
+- [Issue 1: specific problem and affected step]
+- [Issue 2: specific problem and affected step]
+- [Suggestion: what to add/change]
 """
         
         try:
@@ -580,7 +570,7 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         
         # Check if we've exceeded max iterations
         iterations = state.get("planning_iterations", 0)
-        if iterations >= 4:
+        if iterations >= 3:
             print(f"⚠ Max planning iterations ({iterations}) reached. Proceeding with current plan.")
             return "execute"
         
