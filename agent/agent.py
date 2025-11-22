@@ -14,7 +14,9 @@ load_dotenv(override=True)  # override=True ensures env vars are loaded even if 
 # Define state as TypedDict for LangGraph
 class AgentState(TypedDict):
     """The state of the agent throughout execution."""
-    command: str
+    command: str  # The selected text/command from the user
+    feedback: Optional[str]  # Additional user feedback/context
+    app: Optional[str]  # The app name where the command came from (e.g., "Slack", "Email")
     plan: List[Dict[str, Any]]
     current_step_id: Optional[int]
     completed: bool
@@ -62,105 +64,250 @@ class LangGraphAgent:
         ]
         self.graph = self._build_graph()
     
+    def _get_system_prompt(self, app: Optional[str] = None) -> str:
+        """Generate system prompt with optional app context."""
+        base_prompt = """You are an intelligent assistant that helps users execute tasks based on text they select from their applications. 
+
+Your role:
+- You receive a command (selected text) and optional feedback from the user
+- You plan and execute the task step-by-step using available MCP tools
+- You consider the context of where the command came from (the application)
+- You combine the command and feedback to understand the complete intent
+- You execute tasks efficiently and accurately"""
+
+        # Add app context if provided (let LLM interpret the app context)
+        if app:
+            base_prompt += f"""
+
+Context: The command came from the application "{app}". Consider the typical use case and context of this application when interpreting the command and planning the execution."""
+        
+        return base_prompt
+    
+    @traceable(name="summarize_command")
+    def summarize_command(self, state: AgentState) -> AgentState:
+        """Summarize long or unclear commands into clear, actionable commands."""
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
+        
+        # Combine command and feedback
+        full_input = command
+        if feedback:
+            full_input = f"{command}\n\nAdditional context: {feedback}"
+        
+        # Check if summarization is needed (long text or unclear)
+        # Use a simple heuristic: if command is very long (>500 chars) or seems like a conversation
+        needs_summarization = (
+            len(command) > 500 or 
+            command.count('\n') > 5 or
+            command.count('?') > 3 or  # Multiple questions might indicate a conversation
+            (feedback and len(feedback) > 200)
+        )
+        
+        if not needs_summarization:
+            print(f"Command is clear and concise (length: {len(command)} chars), no summarization needed.")
+            return state
+        
+        print(f"Summarizing command (length: {len(command)} chars, newlines: {command.count(chr(10))}, questions: {command.count('?')})...")
+        
+        # Get system prompt
+        system_prompt = self._get_system_prompt(app)
+        
+        summarization_prompt = f"""Extract a clear, actionable command from this selected text:
+
+{full_input}
+
+Guidelines:
+- Extract the main task from conversations/chats
+- Keep clear commands as-is (just clean up)
+- Preserve important details (dates, times, emails, names)
+- Output only the command, no explanations
+"""
+        
+        try:
+            # Use regular messages API (not beta) since we don't need MCP tools for summarization
+            response = self.client.messages.create(
+                model="claude-3-5-haiku-20241022",  # Using cheaper model for summarization
+                max_tokens=500,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": summarization_prompt}
+                ],
+            )
+            
+            # Extract text from response (handle both text blocks and direct text)
+            summarized_command = ""
+            if hasattr(response, 'content') and response.content:
+                for block in response.content:
+                    if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                        summarized_command += block.text
+                    elif hasattr(block, 'text'):  # Fallback for direct text attribute
+                        summarized_command += block.text
+            
+            if not summarized_command:
+                raise ValueError("No text content in response")
+            
+            summarized_command = summarized_command.strip()
+            # Clean up the command (remove quotes if wrapped)
+            if summarized_command.startswith('"') and summarized_command.endswith('"'):
+                summarized_command = summarized_command[1:-1]
+            if summarized_command.startswith("'") and summarized_command.endswith("'"):
+                summarized_command = summarized_command[1:-1]
+            
+            print(f"Summarized command: {summarized_command[:100]}...")
+            # Update the command in state - this will be used for all subsequent phases
+            state["command"] = summarized_command
+            print(f"✓ Command updated in state (length: {len(summarized_command)} chars)")
+            
+        except Exception as e:
+            print(f"Warning: Summarization failed: {e}. Using original command.")
+            # Keep original command if summarization fails
+        
+        return state
+    
+    @traceable(name="summarize_context")
+    def summarize_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Summarize the execution context to reduce token usage when it gets large."""
+        # Calculate total size of context
+        context_str = json.dumps(context, indent=2)
+        context_size = len(context_str)
+        
+        # Only summarize if context is getting large (>2000 chars)
+        if context_size < 2000:
+            return context
+        
+        print(f"Context is large ({context_size} chars), summarizing with cheaper model...")
+        
+        # Build a summary prompt
+        context_summary_prompt = f"""Summarize this execution context, preserving all critical information needed for subsequent steps:
+
+{context_str}
+
+Guidelines:
+- Preserve all structured data (IDs, links, keys, values) that might be needed for tool calls
+- Keep summaries concise but complete
+- Maintain references between steps (e.g., "step_1 result used in step_2")
+- Output a JSON object with the same structure but summarized content
+"""
+        
+        try:
+            # Use regular messages API (not beta) since we don't need MCP tools for summarization
+            response = self.client.messages.create(
+                model="claude-3-5-haiku-20241022",  # Using cheaper model for context summarization
+                max_tokens=2000,
+                system="You are a helpful assistant that summarizes execution context while preserving all critical data.",
+                messages=[
+                    {"role": "user", "content": context_summary_prompt}
+                ],
+            )
+            
+            # Extract text from response (handle both text blocks and direct text)
+            summary_text = ""
+            if hasattr(response, 'content') and response.content:
+                for block in response.content:
+                    if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                        summary_text += block.text
+                    elif hasattr(block, 'text'):  # Fallback for direct text attribute
+                        summary_text += block.text
+            
+            if not summary_text:
+                raise ValueError("No text content in response")
+            
+            summary_text = summary_text.strip()
+            
+            # Try to extract JSON from the response
+            json_match = re.search(r'\{.*\}', summary_text, re.DOTALL)
+            if json_match:
+                try:
+                    summarized_context = json.loads(json_match.group())
+                    print(f"✓ Context summarized: {len(context)} items -> {len(json.dumps(summarized_context))} chars")
+                    return summarized_context
+                except Exception as e:
+                    print(f"Warning: Failed to parse summarized context JSON: {e}")
+            
+            # Fallback: create a simplified context structure
+            summarized = {}
+            for key, value in context.items():
+                if isinstance(value, dict):
+                    # Keep structured output but summarize text
+                    summarized[key] = {
+                        "summary": value.get("summary", "")[:200] + "..." if len(value.get("summary", "")) > 200 else value.get("summary", ""),
+                        "structured_output": value.get("structured_output"),  # Keep full structured data
+                        "description": value.get("description", "")
+                    }
+                else:
+                    summarized[key] = str(value)[:200] + "..." if len(str(value)) > 200 else value
+            
+            return summarized
+            
+        except Exception as e:
+            print(f"Warning: Context summarization failed: {e}. Using original context.")
+            return context
+    
     @traceable(name="plan_phase")
     def plan_phase(self, state: AgentState) -> AgentState:
         """Phase 1: Plan the steps needed to accomplish the command."""
         validation_feedback = state.get("validation_feedback")
         iteration = state.get("planning_iterations", 0) + 1
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
+        
+        # Get system prompt with app context
+        system_prompt = self._get_system_prompt(app)
         
         # Build planning prompt with feedback if this is a refinement
-        feedback_section = ""
+        validation_section = ""
         if validation_feedback:
-            feedback_section = f"""
+            validation_section = f"""
 
 IMPORTANT: Previous validation found issues with the plan. Please address these:
 {validation_feedback}
 
 Revise the plan to fix these issues."""
         
-        planning_prompt = f"""You need to break down this command into clear, executable steps: "{state['command']}"
+        # Combine command and feedback
+        user_input = command
+        if feedback:
+            user_input = f"Command: {command}\n\nAdditional feedback/context: {feedback}"
+        
+        planning_prompt = f"""Task: {user_input}
+{validation_section}
 
-You have access to MCP tools via the Zapier MCP server. The tool schemas (names, descriptions, parameters) are automatically available to you.
-{feedback_section}
+You have access to MCP tools via Zapier. Tool schemas are automatically available.
 
-CRITICAL: Break down the task into ALL necessary intermediate steps. For example:
-- If creating a meeting and sending a link, you need: 1) Create meeting, 2) Get/retrieve the meeting link, 3) Send email with link
-- Don't skip steps that require getting information from a previous step's result
-- Each step should produce output that can be used by subsequent steps
+CRITICAL: Include ALL intermediate steps. Example: "create meeting and send link" needs:
+1. Create meeting
+2. Get meeting link (from step 1 result)
+3. Send email with link
 
-Based on the available tools above, plan the steps. Each step should:
-1. Be specific and actionable
-2. Use a single tool call per step
-3. Be broken down enough that one tool call can accomplish it
-4. Reference the exact tool name from the available tools list
-5. Include ALL intermediate steps (e.g., getting a link after creating something, retrieving data before using it)
+Each step should:
+- Be specific and actionable
+- Use one tool call
+- Reference exact tool name
+- Include intermediate steps (getting data from previous results)
 
-Return a JSON list of steps, each with:
-- id: sequential number starting from 1
-- description: what this step does (be very specific)
-- tool_name: the exact name of the tool to use (from the available tools list, or null if unsure)
-- tool_args: the arguments for the tool (if known, otherwise null)
+Return JSON list with:
+- id: sequential number
+- description: specific step description
+- tool_name: exact tool name (or null)
+- tool_args: tool arguments (or null)
 - status: "pending"
 
-Example format for "create meeting and send link":
+Example:
 [
-  {{"id": 1, "description": "Create a calendar event for Tuesday at 13:00", "tool_name": "create_calendar_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
-  {{"id": 2, "description": "Retrieve the meeting link from the created calendar event", "tool_name": "get_calendar_event_link", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
-  {{"id": 3, "description": "Send email to example@gmail.com with the meeting link", "tool_name": "send_email", "tool_args": {{"to": "example@gmail.com", "subject": "Meeting Link", "body": "Link from step 2"}}, "status": "pending"}}
+  {{"id": 1, "description": "Create calendar event for Tuesday 13:00", "tool_name": "create_calendar_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
+  {{"id": 2, "description": "Get meeting link from created event", "tool_name": "get_calendar_event_link", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
+  {{"id": 3, "description": "Send email with meeting link", "tool_name": "send_email", "tool_args": {{"to": "example@gmail.com", "body": "Link from step 2"}}, "status": "pending"}}
 ]
 
-Now plan the steps for: "{state['command']}"
+Plan steps for: "{command}"
 """
         
         response = self.client.beta.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",
             max_tokens=2000,
-            messages=[{"role": "user", "content": planning_prompt}],
-            mcp_servers=self.mcp_servers,
-            betas=["mcp-client-2025-04-04"],
-        )
-        
-        # Extract the plan from the response
-        plan_text = response.content[0].text
-        
-        # Parse the JSON plan
-        json_match = re.search(r'\[.*\]', plan_text, re.DOTALL)
-        if json_match:
-            try:
-                steps_data = json.loads(json_match.group())
-                # Ensure all steps have status
-                for step in steps_data:
-                    if "status" not in step:
-                        step["status"] = "pending"
-                state["plan"] = steps_data
-                state["planning_iterations"] = iteration
-                return state
-            except Exception as e:
-                print(f"Error parsing JSON plan: {e}")
-        
-        # Fallback: create steps from description if JSON parsing fails
-        lines = plan_text.split('\n')
-        steps = []
-        step_id = 1
-        for line in lines:
-            if re.match(r'^\d+[\.\)]', line.strip()):
-                desc = re.sub(r'^\d+[\.\)]\s*', '', line.strip())
-                steps.append({
-                    "id": step_id,
-                    "description": desc,
-                    "status": "pending",
-                    "tool_name": None,
-                    "tool_args": None
-                })
-                step_id += 1
-        
-        state["plan"] = steps if steps else [{"id": 1, "description": state["command"], "status": "pending", "tool_name": None, "tool_args": None}]
-        state["planning_iterations"] = iteration
-        return state
-        
-        response = self.client.beta.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+            system=system_prompt,
             messages=[{"role": "user", "content": planning_prompt}],
             mcp_servers=self.mcp_servers,
             betas=["mcp-client-2025-04-04"],
@@ -283,11 +430,25 @@ Now plan the steps for: "{state['command']}"
         # Update step status
         step["status"] = "in_progress"
         
+        # Get system prompt with app context
+        app = state.get("app")
+        system_prompt = self._get_system_prompt(app)
+        
         # Build the execution prompt
         context = state.get("execution_context", {})
         
+        # Add feedback to context if available (important info might be there)
+        feedback = state.get("feedback")
+        command = state.get("command", "")
+        
         # Build comprehensive context string with structured data
         context_str = ""
+        # Add original command and feedback at the start
+        if feedback:
+            context_str += f"\n=== ORIGINAL CONTEXT ===\nCommand: {command}\nFeedback: {feedback}\n=== END ORIGINAL CONTEXT ===\n"
+        elif command:
+            context_str += f"\n=== ORIGINAL COMMAND ===\n{command}\n=== END ORIGINAL COMMAND ===\n"
+        
         if context:
             context_parts = []
             for key, value in context.items():
@@ -310,30 +471,28 @@ Now plan the steps for: "{state['command']}"
             if context_parts:
                 context_str = f"\n\n=== CONTEXT FROM PREVIOUS STEPS ===\n{chr(10).join(context_parts)}\n=== END CONTEXT ===\n"
         
-        execution_prompt = f"""Execute this step: {step['description']}
-
-You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
+        execution_prompt = f"""Execute: {step['description']}
 
 {context_str}
 
-Use the appropriate tool from the available tools above to accomplish this step. 
-- If a tool_name was specified in the plan, use that exact tool
-- If you need information from previous steps, use the structured output data provided in the context above
-- Extract specific values from the structured output (e.g., htmlLink, hangoutLink, id, event details, etc.) to use in this step
-- Make sure to use the correct tool name and provide all required parameters
+Instructions:
+- Use the tool specified in the plan (or appropriate tool if not specified)
+- Extract data from previous steps' structured output (e.g., htmlLink, hangoutLink, id)
+- Provide all required tool parameters
 
-IMPORTANT: After the tool executes, the response will include structured data. Please include that full structured output in your response so it can be used by subsequent steps.
-
-Format your response as:
-Summary: [brief description of what was done]
-Structured Output: [the full JSON/structured data returned by the tool]
+Response format:
+Summary: [what was done]
+Structured Output: [full JSON/structured data from tool]
 """
         
         try:
             response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=2000,
-                messages=[{"role": "user", "content": execution_prompt}],
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": execution_prompt}
+                ],
                 mcp_servers=self.mcp_servers,
                 betas=["mcp-client-2025-04-04"],
             )
@@ -376,11 +535,16 @@ Structured Output: [the full JSON/structured data returned by the tool]
     def validate_plan(self, state: AgentState) -> AgentState:
         """Validate the plan for missing steps, ambiguous items, and completeness."""
         plan = state.get("plan", [])
-        command = state["command"]
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
         
         if not plan:
             state["validation_feedback"] = "Plan is empty. Please create a plan with at least one step."
             return state
+        
+        # Get system prompt with app context
+        system_prompt = self._get_system_prompt(app)
         
         # Build validation prompt
         plan_summary = "\n".join([
@@ -388,36 +552,39 @@ Structured Output: [the full JSON/structured data returned by the tool]
             for s in plan
         ])
         
-        validation_prompt = f"""Review this plan for the command: "{command}"
+        user_input = command
+        if feedback:
+            user_input = f"Command: {command}\nAdditional feedback: {feedback}"
+        
+        validation_prompt = f"""Review this plan for: "{user_input}"
 
-Current plan:
+Plan:
 {plan_summary}
 
-You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
-
 Check for:
-1. Missing intermediate steps (e.g., if creating something and then using its result, is there a step to retrieve/get that result?)
-2. Ambiguous steps that need more detail
-3. Steps that reference data from previous steps but don't show how to get that data
+1. Missing intermediate steps (e.g., getting a link after creating something)
+2. Ambiguous or unclear steps
+3. Steps referencing data without showing how to get it
 4. Missing tool assignments
-5. Logical gaps between steps
+5. Logical gaps
 
-If the plan is complete and all steps are clear, respond with: "APPROVED"
+If approved, respond: "APPROVED"
 
-If there are issues, respond with specific feedback in this format:
+If issues found, respond:
 ISSUES FOUND:
-- [Issue 1: specific problem and what step is affected]
-- [Issue 2: specific problem and what step is affected]
-- [Suggestion: what should be added or changed]
-
-Be thorough - catch missing intermediate steps like getting a link after creating a meeting, retrieving data before using it, etc.
+- [Issue 1: specific problem and affected step]
+- [Issue 2: specific problem and affected step]
+- [Suggestion: what to add/change]
 """
         
         try:
             response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=1500,
-                messages=[{"role": "user", "content": validation_prompt}],
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": validation_prompt}
+                ],
                 mcp_servers=self.mcp_servers,
                 betas=["mcp-client-2025-04-04"],
             )
@@ -447,7 +614,7 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         
         # Check if we've exceeded max iterations
         iterations = state.get("planning_iterations", 0)
-        if iterations >= 4:
+        if iterations >= 3:
             print(f"⚠ Max planning iterations ({iterations}) reached. Proceeding with current plan.")
             return "execute"
         
@@ -480,6 +647,9 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
                         "structured_output": step.get("structured_output"),
                         "description": step.get("description", "")
                     }
+                    
+                    # Summarize context if it's getting large (after each addition)
+                    context = self.summarize_context(context)
                 
                 # If step failed, stop execution
                 if step.get("status") == "failed":
@@ -503,12 +673,14 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("summarize", self.summarize_command)
         workflow.add_node("plan", self.plan_phase)
         workflow.add_node("validate", self.validate_plan)
         workflow.add_node("execute", self.execute_phase)
         
-        # Define the flow: plan -> validate -> (replan or execute) -> end
-        workflow.set_entry_point("plan")
+        # Define the flow: summarize -> plan -> validate -> (replan or execute) -> end
+        workflow.set_entry_point("summarize")
+        workflow.add_edge("summarize", "plan")
         workflow.add_edge("plan", "validate")
         
         # Conditional edge: validate -> replan (if issues) or execute (if approved)
@@ -525,11 +697,19 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         return workflow.compile()
     
     @traceable(name="run_agent")
-    def run(self, command: str) -> AgentState:
-        """Run the full agent workflow: discover tools -> plan -> execute."""
+    def run(self, command: str, feedback: Optional[str] = None, app: Optional[str] = None) -> AgentState:
+        """Run the full agent workflow: plan -> validate -> execute.
+        
+        Args:
+            command: The selected text/command from the user
+            feedback: Additional user feedback/context (e.g., meeting duration)
+            app: The app name where the command came from (e.g., "Slack", "Email")
+        """
         # Initialize state
         initial_state: AgentState = {
             "command": command,
+            "feedback": feedback,
+            "app": app,
             "plan": [],
             "current_step_id": None,
             "completed": False,
@@ -539,8 +719,9 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
             "planning_iterations": 0
         }
         
-        # Run the graph - it will handle plan -> validate -> (replan if needed) -> execute
+        # Run the graph - it will handle summarize -> plan -> validate -> (replan if needed) -> execute
         print("Running agent workflow...")
+        print("Phase 0: Summarizing command (if needed)...")
         print("Phase 1: Planning and validation...")
         state = self.graph.invoke(initial_state)
         
