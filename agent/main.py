@@ -1,5 +1,4 @@
 """Main entry point for the agent."""
-import json
 from agent import LangGraphAgent
 
 
@@ -7,7 +6,7 @@ def main():
     """Run the agent with a command."""
     # Example command
     command_data = {
-        "text": "create a meeting for tuesday 13:00 and send the link to bigdenzill@gmail.com"
+        "text": "create a meeting for tuesday 13:00 and send the link to aircode610@gmail.com"
     }
     
     # Extract the command text
