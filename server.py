@@ -7,13 +7,42 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+# Load environment variables from .env file BEFORE importing agent
+from dotenv import load_dotenv
+
+# Get the directory where server.py is located
+server_dir = Path(__file__).parent
+env_path = server_dir / ".env"
+
+# Print debug info about .env file
+print(f"DEBUG: server.py location: {Path(__file__).absolute()}")
+print(f"DEBUG: Looking for .env at: {env_path.absolute()}")
+print(f"DEBUG: .env exists: {env_path.exists()}")
+
+# Load .env file with explicit path
+if env_path.exists():
+    print(f"DEBUG: Loading .env from {env_path}")
+
+    # Read the file manually to see what's in it
+    with open(env_path, 'r') as f:
+        content = f.read()
+        print(f"DEBUG: .env file content (first 200 chars):")
+        print(repr(content[:200]))
+
+    load_dotenv(dotenv_path=env_path, override=True)
+    print(f"DEBUG: Loaded .env from {env_path}")
+else:
+    print(f"ERROR: .env file not found at {env_path}")
+    # Try to load from current working directory as fallback
+    load_dotenv()
+
 # Add agent directory to path
 agent_dir = Path(__file__).parent / "agent"
 sys.path.insert(0, str(agent_dir))
 
 from agent import LangGraphAgent
 
-HOST = "localhost"   # listen on all interfaces
+HOST = "localhost"  # listen on all interfaces
 
 # Log file path
 LOG_FILE = os.path.expanduser("~/Library/Application Support/Logi/LogiPluginService/Logs/plugin_logs/MouseTron.log")
@@ -33,8 +62,26 @@ def log_to_file(message):
         f.write(f"[{timestamp}] {message}\n")
 
 
-# Initialize agent once at module level
+# Print environment variable to verify it's loaded
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+zapier_token = os.getenv("ZAPIER_AUTHORIZATION_TOKEN")
+print(f"DEBUG: ANTHROPIC_API_KEY loaded: {anthropic_key[:20] + '...' if anthropic_key else 'None'}")
+print(f"DEBUG: ZAPIER_AUTHORIZATION_TOKEN loaded: {zapier_token[:20] + '...' if zapier_token else 'None'}")
+
+# Print all environment variables that start with ANTHROPIC or ZAPIER
+print("DEBUG: All ANTHROPIC/ZAPIER env vars:")
+for key, value in os.environ.items():
+    if 'ANTHROPIC' in key or 'ZAPIER' in key:
+        print(f"  {key}: {value[:20] if value else 'None'}...")
+
+log_to_file(f"DEBUG: .env path: {env_path.absolute()}")
+log_to_file(f"DEBUG: .env exists: {env_path.exists()}")
+log_to_file(f"DEBUG: ANTHROPIC_API_KEY loaded: {anthropic_key[:20] + '...' if anthropic_key else 'None'}")
+log_to_file(f"DEBUG: ZAPIER_AUTHORIZATION_TOKEN loaded: {zapier_token[:20] + '...' if zapier_token else 'None'}")
+
+# Initialize agent once at module level - MUST be declared before get_agent() is defined
 _agent = None
+
 
 def get_agent():
     """Get or initialize the agent instance."""
@@ -54,7 +101,6 @@ def get_agent():
 _agent_state_lock = threading.Lock()
 _current_agent_state = None
 _agent_running = False
-
 
 def get_current_steps():
     """Get current step statuses in a thread-safe way."""
@@ -172,7 +218,9 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
         print("Headers:")
         print(self.headers)
         print("Body (raw):", body)
-        
+
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        log_to_file(f"DEBUG: ANTHROPIC_API_KEY loaded: {anthropic_key[:20] if anthropic_key else 'None'}...")
         body_decoded = None
         try:
             body_decoded = body.decode("utf-8")
