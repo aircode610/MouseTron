@@ -175,8 +175,8 @@ def post_tool_names(tool_names, post_url=None):
         # Check for environment variable first
         post_url = os.getenv("TOOLS_POST_URL")
         if not post_url:
-            # Use the same port as the server
-            post_url = f"http://localhost:8080/api/tools"
+            # Default to tools receiver service on port 8081
+            post_url = f"http://localhost:8081/api/tools"
     
     payload = {
         "steps": tool_names
