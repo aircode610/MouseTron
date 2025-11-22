@@ -6,8 +6,9 @@ namespace Loupedeck.MouseTronPlugin
     // This class implements a command that sends selected text and user input via POST request
     public class SendTextWithInputAction : PluginDynamicCommand
     {
-        // Default localhost URL - can be configured via plugin settings
-        private const String DefaultPostUrl = "http://localhost:8080/api/input/";
+        // Default port fallback if server port is not available
+        private const Int32 DefaultPort = 8080;
+        private const String DefaultPath = "/api/input/";
 
         // Initializes the command class.
         public SendTextWithInputAction()
@@ -105,14 +106,19 @@ namespace Loupedeck.MouseTronPlugin
         protected override String GetCommandDisplayName(String actionParameter, PluginImageSize imageSize) =>
             "Send Text With Input";
 
-        // Gets the POST URL from plugin settings or returns default
+        // Gets the POST URL from plugin settings or uses server port
         private String GetPostUrl()
         {
+            // First, try to get URL from plugin settings
             if (this.Plugin.TryGetPluginSetting("InputPostUrl", out var url) && !String.IsNullOrEmpty(url))
             {
                 return url;
             }
-            return DefaultPostUrl;
+
+            // Otherwise, use the server port from ServerManagementService
+            var mouseTronPlugin = this.Plugin as MouseTronPlugin;
+            var port = mouseTronPlugin?.ServerPort ?? DefaultPort;
+            return $"http://localhost:{port}{DefaultPath}";
         }
     }
 }
