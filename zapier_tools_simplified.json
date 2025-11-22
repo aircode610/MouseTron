@@ -1,0 +1,1069 @@
+[
+  {
+    "name": "add_tools",
+    "description": "Add new actions to your MCP provider",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "edit_tools",
+    "description": "Edit your existing MCP provider actions",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "gmail_create_label",
+    "description": "Creates a new label.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of label"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_get_attachment_by_filename",
+    "description": "Retrieves a specific Gmail message attachment by Filename.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Message ID"
+        },
+        "attachment_size": {
+          "type": "string",
+          "description": "Attachment Size"
+        },
+        "attachment_filename": {
+          "type": "string",
+          "description": "Attachment Filename"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_find_email",
+    "description": "Finds an email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "query": {
+          "type": "string",
+          "description": "This is a gmail query search. Examples of queries include specifying sender (from:amy), recipient (to:david), words in the subject line (subject:dinner), matching multiple terms (from:amy OR from:david), excluding terms (dinner -movie), searching for an exact word or phrase (\"dinner and movie tonight\"), attachments (has:attachment, filename:pdf), labels (label:friends), and time periods (after:YYYY-MM-DD, before:YYYY-MM-DD). Users can also search by categories (category:updates), message size (larger:10M), and more. When asked vaguely to return the last, latest, or any email from their inbox, use in:inbox to do the lookup."
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_add_label_to_email",
+    "description": "Add a label to an email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Message"
+        },
+        "new_label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_archive_email",
+    "description": "Archive an email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Message"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_delete_email",
+    "description": "Sends an email message to the trash.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Email message to be Deleted"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_create_draft",
+    "description": "Create a draft email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "body": {
+          "type": "string",
+          "description": "Specify content of the email to draft. It should be in the HTML format unless specified otherwise."
+        },
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attachments"
+        },
+        "from": {
+          "type": "string",
+          "description": "From"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject"
+        },
+        "body_type": {
+          "type": "string",
+          "description": "Specify content's type of the email to draft. It should default to 'html' unless specified otherwise."
+        },
+        "from_name": {
+          "type": "string",
+          "description": "From Name"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label or mailbox"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Add signature default"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_create_draft_reply",
+    "description": "Create a draft reply to an existing email.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Cc"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "To"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Bcc"
+        },
+        "body": {
+          "type": "string",
+          "description": "Body"
+        },
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attachments"
+        },
+        "from": {
+          "type": "string",
+          "description": "From"
+        },
+        "body_type": {
+          "type": "string",
+          "description": "Body type"
+        },
+        "from_name": {
+          "type": "string",
+          "description": "From Name"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label or mailbox"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Add signature default"
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "Thread"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_send_email",
+    "description": "Create and send a new email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Can be comma separated. The user must provide a valid email address, do not guess or use fake email addresses like @example.com. Perhaps look it up in a CRM or contact book first?"
+        },
+        "body": {
+          "type": "string",
+          "description": "Body"
+        },
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attachments"
+        },
+        "from": {
+          "type": "string",
+          "description": "From"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject"
+        },
+        "reply_to": {
+          "type": "string",
+          "description": "Reply To"
+        },
+        "body_type": {
+          "type": "string",
+          "description": "Body type"
+        },
+        "from_name": {
+          "type": "string",
+          "description": "From Name"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label or mailbox"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Add signature default"
+        },
+        "send_to_groups": {
+          "type": "string",
+          "description": "Send message to Google Contacts Group/Label"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_remove_label_from_email",
+    "description": "Remove a label from an email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label(s) to remove"
+        },
+        "message_id": {
+          "type": "string",
+          "description": "Message"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_remove_label_from_conversation",
+    "description": "Remove a specified label from all emails within a conversation.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label(s) to remove"
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "Thread"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "gmail_reply_to_email",
+    "description": "Send a reply to an email message.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "cc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Cc"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "To"
+        },
+        "bcc": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Bcc"
+        },
+        "body": {
+          "type": "string",
+          "description": "Body"
+        },
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Attachments"
+        },
+        "from": {
+          "type": "string",
+          "description": "From"
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject"
+        },
+        "reply_to": {
+          "type": "string",
+          "description": "Reply To"
+        },
+        "body_type": {
+          "type": "string",
+          "description": "Body type"
+        },
+        "from_name": {
+          "type": "string",
+          "description": "From Name"
+        },
+        "label_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Label or mailbox"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Add signature default"
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "Thread"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_insert_image",
+    "description": "Insert an image at a specific position in a Google Doc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "index": {
+          "type": "string",
+          "description": "Insert position (Index)"
+        },
+        "tabId": {
+          "type": "string",
+          "description": "Tab ID"
+        },
+        "width": {
+          "type": "string",
+          "description": "Width (points)"
+        },
+        "height": {
+          "type": "string",
+          "description": "Height (points)"
+        },
+        "imageUri": {
+          "type": "string",
+          "description": "Image URL"
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Segment ID"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Document"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_find_a_document",
+    "description": "Search for a specific document by name.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "drive": {
+          "type": "string",
+          "description": "Drive"
+        },
+        "title": {
+          "type": "string",
+          "description": "Document Name"
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_get_document_content",
+    "description": "Retrieves the full content and metadata of a Google Doc by ID.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "document_id": {
+          "type": "string",
+          "description": "Document ID"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_append_text_to_document",
+    "description": "Appends text to an existing document.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "file": {
+          "type": "string",
+          "description": "Document Name"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to Append"
+        },
+        "drive": {
+          "type": "string",
+          "description": "Drive"
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder"
+        },
+        "newline": {
+          "type": "string",
+          "description": "Append Text on New Line?"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_create_document_from_template",
+    "description": "Creates a new doc based on an existing one and can replace any placeholder variables found in your template doc, like {{name}}, {{email}}, etc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "file": {
+          "type": "string",
+          "description": "Template Document"
+        },
+        "drive": {
+          "type": "string",
+          "description": "Drive"
+        },
+        "image": {
+          "type": "string",
+          "description": "Insert Inline Image (Image URL)"
+        },
+        "title": {
+          "type": "string",
+          "description": "New Document Name"
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder for new Document"
+        },
+        "image_index": {
+          "type": "string",
+          "description": "Image location (Index)"
+        },
+        "image_tabId": {
+          "type": "string",
+          "description": "Image location (tabId)"
+        },
+        "export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Export Formats"
+        },
+        "template_drive": {
+          "type": "string",
+          "description": "Drive containing the template document"
+        },
+        "image_segmentId": {
+          "type": "string",
+          "description": "Image location (Segment ID)"
+        },
+        "template_folder": {
+          "type": "string",
+          "description": "Folder containing the template document"
+        },
+        "sharing_preference": {
+          "type": "string",
+          "description": "Sharing Preference"
+        },
+        "empty_fields_preference": {
+          "type": "string",
+          "description": "Unused Fields Preference"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_upload_document",
+    "description": "Copy an already-existing file from another service to Docs. Will convert the file to Google Doc format if possible.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "file": {
+          "type": "string",
+          "description": "File"
+        },
+        "drive": {
+          "type": "string",
+          "description": "Drive"
+        },
+        "title": {
+          "type": "string",
+          "description": "Specify Document Name"
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_find_and_replace_text",
+    "description": "Find and replace text in a Google Doc with case sensitivity support.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "find_text": {
+          "type": "string",
+          "description": "Find text"
+        },
+        "match_case": {
+          "type": "string",
+          "description": "Match case"
+        },
+        "document_id": {
+          "type": "string",
+          "description": "Document"
+        },
+        "replace_text": {
+          "type": "string",
+          "description": "Replace text"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_format_text",
+    "description": "Format text in a Google Doc with bold, italic, colors, and other styling options.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "tabId": {
+          "type": "string",
+          "description": "Tab ID"
+        },
+        "endIndex": {
+          "type": "string",
+          "description": "End position (Index)"
+        },
+        "fontSize": {
+          "type": "string",
+          "description": "Font size (points)"
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Segment ID"
+        },
+        "textColor": {
+          "type": "string",
+          "description": "Text color (hex)"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Document"
+        },
+        "fontFamily": {
+          "type": "string",
+          "description": "Font family"
+        },
+        "startIndex": {
+          "type": "string",
+          "description": "Start position (Index)"
+        },
+        "backgroundColor": {
+          "type": "string",
+          "description": "Background color (hex)"
+        },
+        "formattingOptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Formatting Options"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_insert_text",
+    "description": "Insert text at a specific position in a Google Doc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to insert"
+        },
+        "index": {
+          "type": "string",
+          "description": "Insert position (Index)"
+        },
+        "tabId": {
+          "type": "string",
+          "description": "Tab ID"
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Segment ID"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Document"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_create_document_from_text",
+    "description": "Create a new document from text. Also supports limited HTML.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "file": {
+          "type": "string",
+          "description": "Document Content"
+        },
+        "drive": {
+          "type": "string",
+          "description": "Drive"
+        },
+        "image": {
+          "type": "string",
+          "description": "Insert Inline Image (Image URL)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Document Name"
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder"
+        },
+        "image_index": {
+          "type": "string",
+          "description": "Image location (Index)"
+        },
+        "image_tabId": {
+          "type": "string",
+          "description": "Image location (tabId)"
+        },
+        "export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Export Formats"
+        },
+        "image_segmentId": {
+          "type": "string",
+          "description": "Image location (Segment ID)"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_replace_image",
+    "description": "Replace an existing image in a Google Doc with a new one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "tabId": {
+          "type": "string",
+          "description": "Select which tab the image is in"
+        },
+        "imageUri": {
+          "type": "string",
+          "description": "New image URL"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Document"
+        },
+        "imageObjectId": {
+          "type": "string",
+          "description": "Select which image to replace"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "google_docs_update_document_properties",
+    "description": "Update document properties like background color, margins, and page settings in a Google Doc.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "marginTop": {
+          "type": "string",
+          "description": "Top margin (points)"
+        },
+        "pageWidth": {
+          "type": "string",
+          "description": "Page width (points)"
+        },
+        "documentId": {
+          "type": "string",
+          "description": "Document"
+        },
+        "marginLeft": {
+          "type": "string",
+          "description": "Left margin (points)"
+        },
+        "pageHeight": {
+          "type": "string",
+          "description": "Page height (points)"
+        },
+        "marginRight": {
+          "type": "string",
+          "description": "Right margin (points)"
+        },
+        "marginBottom": {
+          "type": "string",
+          "description": "Bottom margin (points)"
+        },
+        "backgroundColor": {
+          "type": "string",
+          "description": "Background color (hex)"
+        },
+        "pageNumberStart": {
+          "type": "string",
+          "description": "Page number start"
+        },
+        "useEvenPageHeaderFooter": {
+          "type": "string",
+          "description": "Use different even page header and footer"
+        },
+        "useFirstPageHeaderFooter": {
+          "type": "string",
+          "description": "Use different first page header and footer"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  },
+  {
+    "name": "tavily_search",
+    "description": "Search the web and return answers using Tavily",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "Instructions for running this tool. Any parameters that are not given a value will be guessed based on the instructions."
+        },
+        "query": {
+          "type": "string",
+          "description": "Query"
+        },
+        "topic": {
+          "type": "string",
+          "description": "Topic"
+        },
+        "include_answer": {
+          "type": "string",
+          "description": "Include Answer"
+        },
+        "include_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Include Domains"
+        },
+        "include_raw_content": {
+          "type": "string",
+          "description": "Include Raw Content"
+        }
+      },
+      "required": [
+        "instructions"
+      ]
+    }
+  }
+]
