@@ -272,9 +272,13 @@ Return a JSON array with tool names and descriptions."""
 
 def save_tools_to_file(tools: List[Dict[str, Any]], filename: str = "zapier_tools.json"):
     """Save tools to a JSON file."""
-    with open(filename, "w", encoding="utf-8") as f:
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(script_dir, filename)
+    
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(tools, f, indent=2, ensure_ascii=False)
-    print(f"\n✓ Saved {len(tools)} tools to {filename}")
+    print(f"\n✓ Saved {len(tools)} tools to {filepath}")
 
 
 def print_tools_summary(tools: List[Dict[str, Any]]):
@@ -338,7 +342,7 @@ def main():
         # Print summary
         print_tools_summary(tools)
         
-        # Save to file
+        # Save to file (will be saved in dataset directory)
         save_tools_to_file(tools)
         
         # Also save a simplified version with just names and descriptions

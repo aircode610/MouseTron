@@ -11,15 +11,23 @@ def extract_tool_names(input_file: str = "zapier_tools.json", output_file: str =
         input_file: Path to the input JSON file
         output_file: Path to the output text file
     """
-    # If input file doesn't exist in current dir, try dataset directory
-    if not os.path.exists(input_file):
-        dataset_input = os.path.join("dataset", input_file)
-        if os.path.exists(dataset_input):
-            input_file = dataset_input
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # If output file path is relative, save in dataset directory
-    if not os.path.dirname(output_file):
-        output_file = os.path.join("dataset", output_file)
+    # If input file is relative, look in script directory first
+    if not os.path.isabs(input_file):
+        script_input = os.path.join(script_dir, input_file)
+        if os.path.exists(script_input):
+            input_file = script_input
+        elif not os.path.exists(input_file):
+            # Try dataset directory from project root
+            dataset_input = os.path.join("dataset", input_file)
+            if os.path.exists(dataset_input):
+                input_file = dataset_input
+    
+    # If output file path is relative, save in script directory
+    if not os.path.isabs(output_file):
+        output_file = os.path.join(script_dir, output_file)
     
     try:
         # Read the JSON file
