@@ -49,6 +49,42 @@ namespace Loupedeck.MouseTronPlugin
             }
         }
 
+        // Sends a POST request to localhost with selected text and user input
+        public static async Task<Boolean> SendPostRequestWithInputAsync(String url, String selectedText, String applicationName,  String userInput)
+        {
+            try
+            {
+                var payload = new
+                {
+                    selectedText = selectedText ?? String.Empty,
+                    applicationName = applicationName ?? "Unknown",
+                    input = userInput ?? String.Empty
+                };
+
+                var json = JsonSerializer.Serialize(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var response = await _httpClient.PostAsync(url, content);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    PluginLog.Info($"POST request successful: {responseContent}");
+                    return true;
+                }
+                else
+                {
+                    PluginLog.Warning($"POST request failed with status {response.StatusCode}: {responseContent}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error(ex, $"Failed to send POST request to {url}");
+                return false;
+            }
+        }
+
         // Sends a GET request and returns the response as a string
         public static async Task<String> SendGetRequestAsync(String url)
         {

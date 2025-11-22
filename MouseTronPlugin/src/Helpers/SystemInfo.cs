@@ -460,6 +460,144 @@ namespace Loupedeck.MouseTronPlugin
             return String.Empty;
         }
 
+        // Shows an input dialog to get user input (platform-specific)
+        public static String ShowInputDialog(String title, String prompt, String defaultValue = "")
+        {
+            try
+            {
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    // Windows: Use PowerShell to show input dialog
+                    var script = $@"
+Add-Type -AssemblyName Microsoft.VisualBasic
+$result = [Microsoft.VisualBasic.Interaction]::InputBox('{prompt}', '{title}', '{defaultValue}')
+if ($result) {{ Write-Output $result }} else {{ Write-Output '' }}
+";
+                    var process = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "powershell",
+                            Arguments = $"-NoProfile -Command \"{script}\"",
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        }
+                    };
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    
+                    if (process.ExitCode != 0 && !String.IsNullOrEmpty(error))
+                    {
+                        PluginLog.Warning($"Input dialog error: {error}");
+                    }
+                    
+                    return output.Trim();
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    static string EscapeAppleScriptString(string s)
+                    {
+                        if (s == null)
+                            return "";
+                        
+                        return s
+                            .Replace("\\", "\\\\")
+                            .Replace("\"", "\\\"")
+                            .Replace("\r", " ")
+                            .Replace("\n", " ");
+                    }
+
+                    var escapedPrompt  = EscapeAppleScriptString(prompt);
+                    var escapedTitle   = EscapeAppleScriptString(title);
+                    var escapedDefault = EscapeAppleScriptString(defaultValue);
+
+                    // This is the AppleScript code we want to run
+                    var script = $"display dialog \"{escapedPrompt}\" with title \"{escapedTitle}\" default answer \"{escapedDefault}\"";
+
+                    // Log this once so you can see EXACTLY what AppleScript gets
+                    PluginLog.Info($"AppleScript: {script}");
+
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "/usr/bin/osascript",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+
+                    // Safest: use ArgumentList if available
+                    psi.ArgumentList.Add("-e");
+                    psi.ArgumentList.Add(script);
+
+                    var process = new Process { StartInfo = psi };
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+
+                    if (process.ExitCode != 0)
+                    {
+                        if (!string.IsNullOrEmpty(error) && !error.Contains("User cancelled"))
+                        {
+                            PluginLog.Warning($"Input dialog error: {error}");
+                        }
+                        return null;
+                    }
+
+                    // osascript output example:
+                    // text returned:some text, button returned:OK
+                    var textReturnedIndex = output.IndexOf("text returned:", StringComparison.Ordinal);
+                    if (textReturnedIndex >= 0)
+                    {
+                        var startIndex = textReturnedIndex + "text returned:".Length;
+                        var endIndex = output.IndexOf(",", startIndex, StringComparison.Ordinal);
+                        if (endIndex < 0) endIndex = output.Length;
+                        return output.Substring(startIndex, endIndex - startIndex).Trim();
+                    }
+
+                    return string.Empty;
+                }
+                else
+                {
+                    // Linux: Use zenity or kdialog for input dialog
+                    var process = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "/usr/bin/zenity",
+                            Arguments = $"--entry --title=\"{title}\" --text=\"{prompt}\" --entry-text=\"{defaultValue}\"",
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        }
+                    };
+                    process.Start();
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    
+                    if (process.ExitCode != 0)
+                    {
+                        // User cancelled
+                        return null;
+                    }
+                    
+                    return output.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Warning(ex, "Failed to show input dialog");
+                return null;
+            }
+        }
+
         // Windows API declarations for getting foreground window
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
