@@ -19,7 +19,6 @@ class AgentState(TypedDict):
     current_step_id: Optional[int]
     completed: bool
     final_result: Optional[str]
-    available_tools: Optional[str]
     execution_context: Dict[str, Any]
     validation_feedback: Optional[str]  # Feedback from validation node
     planning_iterations: int  # Track how many times we've planned
@@ -63,46 +62,9 @@ class LangGraphAgent:
         ]
         self.graph = self._build_graph()
     
-    @traceable(name="discover_tools")
-    def discover_tools(self, state: AgentState) -> AgentState:
-        """Discover available tools from MCP servers and return structured information."""
-        if state.get("available_tools"):
-            return state
-        
-        print("Discovering available tools...")
-        try:
-            # Ask for tools in a structured format
-            response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=3000,
-                messages=[{
-                    "role": "user", 
-                    "content": """What tools do you have available from the MCP servers? 
-
-Please provide a detailed list with:
-- Tool name
-- Description of what the tool does
-- Required parameters/arguments
-- Example usage
-
-Format the response clearly so it can be used for planning and execution."""
-                }],
-                mcp_servers=self.mcp_servers,
-                betas=["mcp-client-2025-04-04"],
-            )
-            
-            tools_info = response.content[0].text
-            state["available_tools"] = tools_info
-            return state
-        except Exception as e:
-            print(f"Warning: Could not discover tools: {e}")
-            state["available_tools"] = "Tools discovery failed. Proceeding with general tool knowledge."
-            return state
-    
     @traceable(name="plan_phase")
     def plan_phase(self, state: AgentState) -> AgentState:
         """Phase 1: Plan the steps needed to accomplish the command."""
-        tools_info = state.get("available_tools") or "Tools information not available."
         validation_feedback = state.get("validation_feedback")
         iteration = state.get("planning_iterations", 0) + 1
         
@@ -118,8 +80,7 @@ Revise the plan to fix these issues."""
         
         planning_prompt = f"""You need to break down this command into clear, executable steps: "{state['command']}"
 
-Available tools from MCP servers:
-{tools_info}
+You have access to MCP tools via the Zapier MCP server. The tool schemas (names, descriptions, parameters) are automatically available to you.
 {feedback_section}
 
 CRITICAL: Break down the task into ALL necessary intermediate steps. For example:
@@ -322,8 +283,7 @@ Now plan the steps for: "{state['command']}"
         # Update step status
         step["status"] = "in_progress"
         
-        # Build the execution prompt with tools information
-        tools_info = state.get("available_tools") or "Tools information not available."
+        # Build the execution prompt
         context = state.get("execution_context", {})
         
         # Build comprehensive context string with structured data
@@ -352,8 +312,7 @@ Now plan the steps for: "{state['command']}"
         
         execution_prompt = f"""Execute this step: {step['description']}
 
-Available tools from MCP servers:
-{tools_info}
+You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
 
 {context_str}
 
@@ -418,7 +377,6 @@ Structured Output: [the full JSON/structured data returned by the tool]
         """Validate the plan for missing steps, ambiguous items, and completeness."""
         plan = state.get("plan", [])
         command = state["command"]
-        tools_info = state.get("available_tools") or "Tools information not available."
         
         if not plan:
             state["validation_feedback"] = "Plan is empty. Please create a plan with at least one step."
@@ -435,8 +393,7 @@ Structured Output: [the full JSON/structured data returned by the tool]
 Current plan:
 {plan_summary}
 
-Available tools:
-{tools_info}
+You have access to MCP tools via the Zapier MCP server. The tool schemas are automatically available to you.
 
 Check for:
 1. Missing intermediate steps (e.g., if creating something and then using its result, is there a step to retrieve/get that result?)
@@ -546,14 +503,12 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         workflow = StateGraph(AgentState)
         
         # Add nodes
-        workflow.add_node("discover_tools", self.discover_tools)
         workflow.add_node("plan", self.plan_phase)
         workflow.add_node("validate", self.validate_plan)
         workflow.add_node("execute", self.execute_phase)
         
-        # Define the flow: discover -> plan -> validate -> (replan or execute) -> end
-        workflow.set_entry_point("discover_tools")
-        workflow.add_edge("discover_tools", "plan")
+        # Define the flow: plan -> validate -> (replan or execute) -> end
+        workflow.set_entry_point("plan")
         workflow.add_edge("plan", "validate")
         
         # Conditional edge: validate -> replan (if issues) or execute (if approved)
@@ -579,15 +534,14 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
             "current_step_id": None,
             "completed": False,
             "final_result": None,
-            "available_tools": None,
             "execution_context": {},
             "validation_feedback": None,
             "planning_iterations": 0
         }
         
-        # Run the graph - it will handle discover_tools -> plan -> validate -> (replan if needed) -> execute
+        # Run the graph - it will handle plan -> validate -> (replan if needed) -> execute
         print("Running agent workflow...")
-        print("Phase 1: Discovering tools, planning, and validation...")
+        print("Phase 1: Planning and validation...")
         state = self.graph.invoke(initial_state)
         
         print(f"\nFinal plan with {len(state['plan'])} steps:")
