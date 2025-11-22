@@ -4,6 +4,8 @@ import os
 import json
 import sys
 import threading
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -134,6 +136,92 @@ def clear_agent_state():
         _agent_running = False
 
 
+def extract_tool_names_from_state(state):
+    """Extract tool names from completed steps in order."""
+    if not state or "plan" not in state:
+        return []
+    
+    tool_names = []
+    plan = state.get("plan", [])
+    
+    # Sort by step ID to maintain order
+    sorted_steps = sorted(plan, key=lambda x: x.get("id", 0))
+    
+    for step in sorted_steps:
+        # Get tool name from the step
+        tool_name = step.get("tool_name")
+        
+        # Only include steps that were actually executed (completed or failed)
+        status = step.get("status", "pending")
+        if status in ["completed", "failed", "in_progress"] and tool_name:
+            # Clean up tool name (remove any prefixes/suffixes if needed)
+            tool_name_clean = tool_name.strip()
+            if tool_name_clean:
+                # Allow duplicates since same tool can be called multiple times
+                tool_names.append(tool_name_clean)
+    
+    return tool_names
+
+
+def post_tool_names(tool_names, post_url=None):
+    """POST the list of tool names to an endpoint."""
+    if not tool_names:
+        log_to_file("No tool names to post")
+        print("No tool names to post")
+        return
+    
+    # Default URL if not provided (configurable via environment variable)
+    if post_url is None:
+        # Check for environment variable first
+        post_url = os.getenv("TOOLS_POST_URL")
+        if not post_url:
+            # Use the same port as the server
+            post_url = f"http://localhost:8080/api/tools"
+    
+    payload = {
+        "steps": tool_names
+    }
+    
+    json_data = json.dumps(payload).encode("utf-8")
+    
+    # Log before posting
+    log_message = f"About to POST tool names: {json.dumps(payload, indent=2)}"
+    print(f"\n=== {log_message} ===")
+    log_to_file(log_message)
+    log_to_file(f"POST URL: {post_url}")
+    
+    try:
+        req = urllib.request.Request(
+            post_url,
+            data=json_data,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            response_data = response.read().decode("utf-8")
+            log_to_file(f"POST successful. Response: {response_data}")
+            print(f"POST successful. Response: {response_data}")
+            
+    except urllib.error.HTTPError as e:
+        error_msg = f"HTTP error posting tool names: {e.code} - {e.reason}"
+        log_to_file(f"ERROR: {error_msg}")
+        print(f"ERROR: {error_msg}")
+        if e.fp:
+            error_body = e.fp.read().decode("utf-8")
+            log_to_file(f"Error response body: {error_body}")
+            
+    except urllib.error.URLError as e:
+        error_msg = f"URL error posting tool names: {e.reason}"
+        log_to_file(f"ERROR: {error_msg}")
+        print(f"ERROR: {error_msg}")
+        
+    except Exception as e:
+        error_msg = f"Unexpected error posting tool names: {str(e)}"
+        log_to_file(f"ERROR: {error_msg}")
+        print(f"ERROR: {error_msg}")
+
+
 def run_agent_async(command, feedback, app):
     """Run the agent in a background thread with streaming state updates."""
     def agent_runner():
@@ -178,6 +266,16 @@ def run_agent_async(command, feedback, app):
             # Ensure final state is set
             if final_state:
                 set_agent_state(final_state)
+                
+                # Extract and post tool names after agent finishes
+                tool_names = extract_tool_names_from_state(final_state)
+                if tool_names:
+                    log_to_file(f"Agent finished. Extracted {len(tool_names)} tool names: {tool_names}")
+                    print(f"\n=== Agent finished. Extracted {len(tool_names)} tool names ===")
+                    post_tool_names(tool_names)
+                else:
+                    log_to_file("Agent finished but no tool names found in completed steps")
+                    print("Agent finished but no tool names found in completed steps")
             
             # Keep state for a few seconds, then clear
             import time
@@ -219,8 +317,6 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
         print(self.headers)
         print("Body (raw):", body)
 
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        log_to_file(f"DEBUG: ANTHROPIC_API_KEY loaded: {anthropic_key[:20] if anthropic_key else 'None'}...")
         body_decoded = None
         try:
             body_decoded = body.decode("utf-8")
@@ -236,17 +332,30 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
         log_to_file(f"Body: {body_decoded}")
         log_to_file("")  # Empty line for separation
 
-        # Try to parse JSON and check if it's Format 2 (has 'input' field)
+        # Try to parse JSON and check request type
         response_message = "OK"
         response_status = 200
+        
+        # Get agent instance for Format 2 requests
+        agent = get_agent()
         
         if body_decoded and body_decoded != "<binary data>":
             try:
                 data = json.loads(body_decoded)
                 
+                # Check if this is a tools POST (has 'steps' field) - typically at /api/tools
+                if "steps" in data or self.path == "/api/tools":
+                    # This is a POST with tool names
+                    steps = data.get("steps", [])
+                    log_to_file(f"Received tool names POST at {self.path}: {json.dumps(data, indent=2)}")
+                    print(f"\n=== Received tool names POST ===")
+                    print(f"Path: {self.path}")
+                    print(f"Steps: {steps}")
+                    response_message = f"Received {len(steps)} tool names"
+                    log_to_file(f"Tool names received: {steps}")
+                
                 # Check if this is Format 2 (has 'input' field)
-                agent = get_agent()
-                if "input" in data and agent is not None:
+                elif "input" in data and agent is not None:
                     selected_text = data.get("selectedText", "")
                     application_name = data.get("applicationName", "Unknown")
                     user_input = data.get("input", "")
