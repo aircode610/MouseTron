@@ -127,7 +127,7 @@ Guidelines:
         try:
             # Use regular messages API (not beta) since we don't need MCP tools for summarization
             response = self.client.messages.create(
-                model="claude-3-haiku-20240307",  # Using cheaper model for summarization
+                model="claude-3-5-haiku-20241022",  # Using cheaper model for summarization
                 max_tokens=500,
                 system=system_prompt,
                 messages=[
@@ -193,7 +193,7 @@ Guidelines:
         try:
             # Use regular messages API (not beta) since we don't need MCP tools for summarization
             response = self.client.messages.create(
-                model="claude-3-haiku-20240307",  # Using cheaper model for context summarization
+                model="claude-3-5-haiku-20241022",  # Using cheaper model for context summarization
                 max_tokens=2000,
                 system="You are a helpful assistant that summarizes execution context while preserving all critical data.",
                 messages=[
@@ -305,55 +305,9 @@ Plan steps for: "{command}"
 """
         
         response = self.client.beta.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",
             max_tokens=2000,
             system=system_prompt,
-            messages=[{"role": "user", "content": planning_prompt}],
-            mcp_servers=self.mcp_servers,
-            betas=["mcp-client-2025-04-04"],
-        )
-        
-        # Extract the plan from the response
-        plan_text = response.content[0].text
-        
-        # Parse the JSON plan
-        json_match = re.search(r'\[.*\]', plan_text, re.DOTALL)
-        if json_match:
-            try:
-                steps_data = json.loads(json_match.group())
-                # Ensure all steps have status
-                for step in steps_data:
-                    if "status" not in step:
-                        step["status"] = "pending"
-                state["plan"] = steps_data
-                state["planning_iterations"] = iteration
-                return state
-            except Exception as e:
-                print(f"Error parsing JSON plan: {e}")
-        
-        # Fallback: create steps from description if JSON parsing fails
-        lines = plan_text.split('\n')
-        steps = []
-        step_id = 1
-        for line in lines:
-            if re.match(r'^\d+[\.\)]', line.strip()):
-                desc = re.sub(r'^\d+[\.\)]\s*', '', line.strip())
-                steps.append({
-                    "id": step_id,
-                    "description": desc,
-                    "status": "pending",
-                    "tool_name": None,
-                    "tool_args": None
-                })
-                step_id += 1
-        
-        state["plan"] = steps if steps else [{"id": 1, "description": state["command"], "status": "pending", "tool_name": None, "tool_args": None}]
-        state["planning_iterations"] = iteration
-        return state
-        
-        response = self.client.beta.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
             messages=[{"role": "user", "content": planning_prompt}],
             mcp_servers=self.mcp_servers,
             betas=["mcp-client-2025-04-04"],
@@ -533,7 +487,7 @@ Structured Output: [full JSON/structured data from tool]
         
         try:
             response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=2000,
                 system=system_prompt,
                 messages=[
@@ -625,7 +579,7 @@ ISSUES FOUND:
         
         try:
             response = self.client.beta.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=1500,
                 system=system_prompt,
                 messages=[
