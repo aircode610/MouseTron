@@ -83,6 +83,84 @@ Context: The command came from the application "{app}". Consider the typical use
         
         return base_prompt
     
+    @traceable(name="summarize_command")
+    def summarize_command(self, state: AgentState) -> AgentState:
+        """Summarize long or unclear commands into clear, actionable commands."""
+        command = state.get("command", "")
+        feedback = state.get("feedback")
+        app = state.get("app")
+        
+        # Combine command and feedback
+        full_input = command
+        if feedback:
+            full_input = f"{command}\n\nAdditional context: {feedback}"
+        
+        # Check if summarization is needed (long text or unclear)
+        # Use a simple heuristic: if command is very long (>500 chars) or seems like a conversation
+        needs_summarization = (
+            len(command) > 500 or 
+            command.count('\n') > 5 or
+            command.count('?') > 3 or  # Multiple questions might indicate a conversation
+            (feedback and len(feedback) > 200)
+        )
+        
+        if not needs_summarization:
+            print(f"Command is clear and concise (length: {len(command)} chars), no summarization needed.")
+            return state
+        
+        print(f"Summarizing command (length: {len(command)} chars, newlines: {command.count(chr(10))}, questions: {command.count('?')})...")
+        
+        # Get system prompt
+        system_prompt = self._get_system_prompt(app)
+        
+        summarization_prompt = f"""The user has selected text from {app if app else 'an application'} that may be a long conversation, chat history, or unclear command.
+
+Selected text:
+{full_input}
+
+Your task is to analyze this text and extract/create a single, clear, actionable command that represents what the user wants to accomplish.
+
+Guidelines:
+- If it's a conversation/chat, extract the main task or request
+- If it's already a clear command, keep it as is (just clean it up if needed)
+- If it's unclear, infer the most likely intent based on the context
+- Output should be a single, concise command which also includes the main tasks to be accomplished
+- Focus on the actionable task, not the conversation context
+- Preserve important details like dates, times, emails, names, etc.
+
+Output ONLY the summarized command, nothing else. No explanations, no "The user wants to...", just the command itself.
+"""
+        
+        try:
+            response = self.client.beta.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=500,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": summarization_prompt}
+                ],
+                mcp_servers=self.mcp_servers,
+                betas=["mcp-client-2025-04-04"],
+            )
+            
+            summarized_command = response.content[0].text.strip()
+            # Clean up the command (remove quotes if wrapped)
+            if summarized_command.startswith('"') and summarized_command.endswith('"'):
+                summarized_command = summarized_command[1:-1]
+            if summarized_command.startswith("'") and summarized_command.endswith("'"):
+                summarized_command = summarized_command[1:-1]
+            
+            print(f"Summarized command: {summarized_command[:100]}...")
+            # Update the command in state
+            state["command"] = summarized_command
+            print(f"DEBUG: Updated state command to: {state['command'][:100]}...")
+            
+        except Exception as e:
+            print(f"Warning: Summarization failed: {e}. Using original command.")
+            # Keep original command if summarization fails
+        
+        return state
+    
     @traceable(name="plan_phase")
     def plan_phase(self, state: AgentState) -> AgentState:
         """Phase 1: Plan the steps needed to accomplish the command."""
@@ -150,6 +228,7 @@ Now plan the steps for: "{state['command']}"
         response = self.client.beta.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
+            system=system_prompt,
             messages=[{"role": "user", "content": planning_prompt}],
             mcp_servers=self.mcp_servers,
             betas=["mcp-client-2025-04-04"],
@@ -372,8 +451,8 @@ Structured Output: [the full JSON/structured data returned by the tool]
             response = self.client.beta.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=2000,
+                system=system_prompt,
                 messages=[
-                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": execution_prompt}
                 ],
                 mcp_servers=self.mcp_servers,
@@ -468,8 +547,8 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
             response = self.client.beta.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1500,
+                system=system_prompt,
                 messages=[
-                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": validation_prompt}
                 ],
                 mcp_servers=self.mcp_servers,
@@ -557,12 +636,14 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("summarize", self.summarize_command)
         workflow.add_node("plan", self.plan_phase)
         workflow.add_node("validate", self.validate_plan)
         workflow.add_node("execute", self.execute_phase)
         
-        # Define the flow: plan -> validate -> (replan or execute) -> end
-        workflow.set_entry_point("plan")
+        # Define the flow: summarize -> plan -> validate -> (replan or execute) -> end
+        workflow.set_entry_point("summarize")
+        workflow.add_edge("summarize", "plan")
         workflow.add_edge("plan", "validate")
         
         # Conditional edge: validate -> replan (if issues) or execute (if approved)
@@ -601,8 +682,9 @@ Be thorough - catch missing intermediate steps like getting a link after creatin
             "planning_iterations": 0
         }
         
-        # Run the graph - it will handle plan -> validate -> (replan if needed) -> execute
+        # Run the graph - it will handle summarize -> plan -> validate -> (replan if needed) -> execute
         print("Running agent workflow...")
+        print("Phase 0: Summarizing command (if needed)...")
         print("Phase 1: Planning and validation...")
         state = self.graph.invoke(initial_state)
         
