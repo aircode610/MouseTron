@@ -77,41 +77,34 @@ class LangGraphAgent:
         print("Fetching available tools from MCP server...")
         
         try:
-            # Use a prompt that asks Claude to list all available tools
-            # The MCP server will provide tool schemas automatically
-            prompt = """List all available MCP tools from the Zapier server. 
-
-For each tool, provide a JSON object with:
-- name: the exact tool name (string)
-- description: what the tool does (string)
-- inputSchema: an object with "properties" (object mapping parameter names to their schemas) and "required" (array of required parameter names)
-
-Return ONLY a JSON array in this exact format:
-[
-  {
-    "name": "tool_name_here",
-    "description": "What this tool does",
-    "inputSchema": {
-      "properties": {
-        "param1": {"type": "string", "description": "param description"},
-        "param2": {"type": "number", "description": "param description"}
-      },
-      "required": ["param1"]
-    }
-  },
-  ...
-]
-
-Do not include any text before or after the JSON array."""
-            
+            # Use the official approach from documentation
             response = self.client.beta.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=8000,
-                system="You are a helpful assistant that lists available MCP tools. Return only valid JSON arrays with tool information.",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": "What tools do you have available?"}],
                 mcp_servers=self.mcp_servers,
                 betas=["mcp-client-2025-04-04"],
             )
+            
+            # Log the full response for debugging
+            print("\n" + "="*60)
+            print("MCP Response Debug Info:")
+            print("="*60)
+            print(f"Response type: {type(response)}")
+            print(f"Response has 'content' attribute: {hasattr(response, 'content')}")
+            if hasattr(response, 'content'):
+                print(f"Number of content blocks: {len(response.content)}")
+                for i, block in enumerate(response.content):
+                    print(f"\nBlock {i}:")
+                    print(f"  Type: {getattr(block, 'type', 'N/A')}")
+                    if hasattr(block, 'text'):
+                        text_preview = str(getattr(block, 'text', ''))[:200]
+                        print(f"  Text preview: {text_preview}...")
+                    if hasattr(block, 'name'):
+                        print(f"  Name: {getattr(block, 'name', 'N/A')}")
+                    if hasattr(block, 'input'):
+                        print(f"  Input: {getattr(block, 'input', 'N/A')}")
+            print("="*60 + "\n")
             
             # Extract text response
             text_content = ""
@@ -119,36 +112,76 @@ Do not include any text before or after the JSON array."""
                 if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
                     text_content += block.text
             
+            # Log extracted text content
+            if text_content:
+                print(f"Extracted text content length: {len(text_content)} characters")
+                print(f"Text content preview (first 500 chars):\n{text_content[:500]}...")
+                if len(text_content) > 500:
+                    print(f"... (truncated, total {len(text_content)} chars)")
+            else:
+                print("No text content found in response")
+            
             # Try to parse JSON from response
-            json_match = re.search(r'\[.*\]', text_content, re.DOTALL)
-            if json_match:
-                try:
-                    tools = json.loads(json_match.group())
+            if text_content:
+                print("\nAttempting to extract JSON from text content...")
+                json_match = re.search(r'\[.*\]', text_content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    print(f"Found JSON match, length: {len(json_str)} characters")
+                    print(f"JSON preview (first 300 chars):\n{json_str[:300]}...")
+                    try:
+                        tools = json.loads(json_str)
+                        print(f"✓ Successfully parsed JSON, found {len(tools)} tools")
+                        if tools and isinstance(tools, list) and len(tools) > 0:
+                            print(f"First tool example: {json.dumps(tools[0], indent=2)[:200]}...")
+                        state["available_tools"] = tools
+                        print(f"✓ Fetched {len(tools)} tools")
+                        return state
+                    except json.JSONDecodeError as e:
+                        print(f"⚠ Warning: Failed to parse tools JSON: {e}")
+                        print(f"JSON error at position: {e.pos if hasattr(e, 'pos') else 'unknown'}")
+                        # Fall through to text parsing
+                else:
+                    print("⚠ No JSON array pattern found in text content")
+            
+            # Try parsing text format (if JSON parsing failed or wasn't found)
+            if text_content and not state.get("available_tools"):
+                print("\nAttempting to extract tools from text format...")
+                tools = self._parse_tools_from_text(text_content)
+                if tools:
                     state["available_tools"] = tools
-                    print(f"✓ Fetched {len(tools)} tools")
+                    print(f"✓ Extracted {len(tools)} tools from text response")
                     return state
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Failed to parse tools JSON: {e}")
             
             # Fallback: try to extract tool information from text
             # Look for tool use blocks in the response
+            print("\nAttempting to extract tools from tool_use blocks...")
             tools = []
+            tool_use_count = 0
             for block in response.content:
                 if hasattr(block, 'type') and block.type == 'tool_use':
+                    tool_use_count += 1
+                    tool_name = getattr(block, 'name', '')
+                    tool_input = getattr(block, 'input', {})
+                    print(f"  Found tool_use block: {tool_name}")
                     tool_info = {
-                        "name": getattr(block, 'name', ''),
-                        "description": f"Tool: {getattr(block, 'name', '')}",
-                        "inputSchema": getattr(block, 'input', {})
+                        "name": tool_name,
+                        "description": f"Tool: {tool_name}",
+                        "inputSchema": tool_input if isinstance(tool_input, dict) else {}
                     }
                     tools.append(tool_info)
             
+            print(f"Found {tool_use_count} tool_use blocks")
             if tools:
                 state["available_tools"] = tools
                 print(f"✓ Extracted {len(tools)} tools from response")
                 return state
             
             # If we can't extract tools, create a minimal list
-            print("⚠ Could not extract tools from response, using empty list")
+            print("\n⚠ Could not extract tools from response, using empty list")
+            print("Full response content blocks summary:")
+            for i, block in enumerate(response.content):
+                print(f"  Block {i}: type={getattr(block, 'type', 'N/A')}, has_text={hasattr(block, 'text')}, has_name={hasattr(block, 'name')}")
             state["available_tools"] = []
             
         except Exception as e:
@@ -156,6 +189,119 @@ Do not include any text before or after the JSON array."""
             state["available_tools"] = []
         
         return state
+    
+    def _parse_tools_from_text(self, text_content: str) -> List[Dict[str, Any]]:
+        """Parse tool names and descriptions from text format.
+        
+        Handles formats like:
+        - "zapier_gmail_archive_email - Archive an email message"
+        - "1. zapier_gmail_archive_email - Archive an email message"
+        - "zapier_gmail_archive_email: Archive an email message"
+        """
+        tools = []
+        
+        # Pattern 1: Numbered list format "1. tool_name - description"
+        pattern1 = r'\d+\.\s*(zapier_\w+)\s*-\s*(.+?)(?=\n|$)'
+        matches1 = re.finditer(pattern1, text_content, re.MULTILINE)
+        for match in matches1:
+            tool_name = match.group(1)
+            description = match.group(2).strip()
+            tools.append({
+                "name": tool_name,
+                "description": description,
+                "inputSchema": {}  # Will be available during execution via MCP
+            })
+        
+        # Pattern 2: Dash format "tool_name - description"
+        if not tools:
+            pattern2 = r'(zapier_\w+)\s*-\s*(.+?)(?=\n|$)'
+            matches2 = re.finditer(pattern2, text_content, re.MULTILINE)
+            for match in matches2:
+                tool_name = match.group(1)
+                description = match.group(2).strip()
+                # Skip if we already have this tool
+                if not any(t.get("name") == tool_name for t in tools):
+                    tools.append({
+                        "name": tool_name,
+                        "description": description,
+                        "inputSchema": {}  # Will be available during execution via MCP
+                    })
+        
+        # Pattern 3: Colon format "tool_name: description"
+        if not tools:
+            pattern3 = r'(zapier_\w+)\s*:\s*(.+?)(?=\n|$)'
+            matches3 = re.finditer(pattern3, text_content, re.MULTILINE)
+            for match in matches3:
+                tool_name = match.group(1)
+                description = match.group(2).strip()
+                if not any(t.get("name") == tool_name for t in tools):
+                    tools.append({
+                        "name": tool_name,
+                        "description": description,
+                        "inputSchema": {}  # Will be available during execution via MCP
+                    })
+        
+        # Pattern 4: Just tool names (if description not found)
+        if not tools:
+            # Look for all zapier_* patterns
+            pattern4 = r'\b(zapier_\w+)\b'
+            matches4 = re.finditer(pattern4, text_content)
+            for match in matches4:
+                tool_name = match.group(1)
+                if not any(t.get("name") == tool_name for t in tools):
+                    tools.append({
+                        "name": tool_name,
+                        "description": f"Tool: {tool_name}",
+                        "inputSchema": {}  # Will be available during execution via MCP
+                    })
+        
+        # Remove duplicates
+        seen = set()
+        unique_tools = []
+        for tool in tools:
+            tool_name = tool.get("name")
+            if tool_name and tool_name not in seen:
+                seen.add(tool_name)
+                unique_tools.append(tool)
+        
+        if unique_tools:
+            print(f"  Parsed {len(unique_tools)} tools from text")
+            print(f"  Example: {unique_tools[0].get('name')} - {unique_tools[0].get('description', '')[:50]}...")
+        
+        return unique_tools
+    
+    def _load_tools_from_file(self) -> List[Dict[str, Any]]:
+        """Load tools from saved JSON file as fallback."""
+        # Try to find the tools file in common locations
+        possible_paths = [
+            os.path.join("dataset", "zapier_tools_simplified.json"),
+            os.path.join("dataset", "zapier_tools.json"),
+            "zapier_tools_simplified.json",
+            "zapier_tools.json",
+        ]
+        
+        for file_path in possible_paths:
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        tools = json.load(f)
+                        if isinstance(tools, list) and len(tools) > 0:
+                            # Ensure tools have the expected structure
+                            formatted_tools = []
+                            for tool in tools:
+                                if isinstance(tool, dict) and tool.get("name"):
+                                    formatted_tools.append({
+                                        "name": tool.get("name"),
+                                        "description": tool.get("description", ""),
+                                        "inputSchema": tool.get("inputSchema", {})
+                                    })
+                            if formatted_tools:
+                                return formatted_tools
+                except Exception as e:
+                    print(f"Warning: Failed to load tools from {file_path}: {e}")
+                    continue
+        
+        return []
     
     def _detect_tool_names_in_command(self, command: str, available_tools: List[Dict[str, Any]]) -> List[str]:
         """Detect if command contains tool names and return them.
