@@ -7,10 +7,10 @@ def main():
     # Example: Simulating data from Logitech plugin
     # In real usage, this would come from the plugin
     command_data = {
-        "command": """ read the last email in the inbox and make a google docs with the summary
+        "command": """ send an email with "what's up" content to aircode610@gmail.com
         """,
-        "feedback": "sara's email is aircode610@gmail.com",  # User's additional feedback
-        "app": "Slack"  # App where the text was selected
+        "feedback": "add subject 'not much'",  # User's additional feedback
+        "app": "Chrome"  # App where the text was selected
     }
     
     # Extract the data
