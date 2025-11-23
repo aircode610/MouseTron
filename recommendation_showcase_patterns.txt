@@ -1,0 +1,99 @@
+tavily_search, google_docs_create_document_from_text, gmail_send_email
+-
+gmail_find_email, gmail_create_draft_reply, gmail_send_email
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+google_calendar_find_events, google_calendar_create_detailed_event, gmail_send_email
+-
+google_docs_find_a_document, google_docs_find_and_replace_text, google_docs_update_document_properties
+-
+gmail_find_email
+-
+tavily_search, google_docs_create_document_from_text, google_drive_upload_file, gmail_send_email
+-
+google_calendar_find_busy_periods_in_calendar, google_calendar_create_detailed_event, google_calendar_add_attendee_s_to_event, gmail_send_email
+-
+github_find_issue, github_create_comment, github_update_issue, slack_send_channel_message
+-
+google_drive_find_a_file, google_drive_get_file_permissions, google_drive_add_file_sharing_preference, gmail_send_email
+-
+gmail_send_email
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+google_docs_find_a_document, google_docs_get_document_content, google_docs_find_and_replace_text, gmail_send_email
+-
+zoom_create_meeting, google_calendar_create_detailed_event, gmail_send_email
+-
+gmail_find_email, gmail_add_label_to_email, gmail_archive_email
+-
+tavily_search, google_docs_create_document_from_text, gmail_send_email
+-
+google_calendar_find_events, google_calendar_retrieve_event_by_id, google_calendar_update_event
+-
+github_find_pull_request, github_submit_review, github_update_pull_request, slack_send_channel_message
+-
+google_drive_find_a_file, google_drive_copy_file, google_drive_update_file_folder_name
+-
+gmail_find_email, gmail_create_draft, gmail_send_email
+-
+google_calendar_create_detailed_event
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+google_docs_find_a_document, google_docs_insert_text, google_docs_format_text, google_drive_upload_file
+-
+tavily_search, google_docs_create_document_from_text, google_drive_upload_file, gmail_send_email
+-
+zoom_find_meeting_webinar, zoom_get_meeting_summary, gmail_send_email
+-
+gmail_find_email, gmail_get_attachment_by_filename, google_drive_upload_file
+-
+slack_get_conversation, slack_send_channel_message
+-
+github_find_issue, github_create_issue, github_add_labels_to_issue, slack_send_channel_message
+-
+google_drive_find_a_file, google_drive_create_folder, google_drive_move_file
+-
+gmail_send_email
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+google_docs_find_a_document, google_docs_append_text_to_document, google_docs_update_document_properties
+-
+google_calendar_find_events, google_calendar_create_detailed_event, gmail_send_email
+-
+tavily_search, google_docs_create_document_from_text, gmail_send_email
+-
+gmail_find_email
+-
+github_find_repository, github_create_branch, github_create_pull_request
+-
+google_drive_find_a_file, google_drive_export_file, gmail_send_email
+-
+zoom_create_meeting, google_calendar_create_detailed_event, slack_send_channel_message
+-
+google_docs_find_a_document, google_docs_insert_image, google_docs_replace_image, google_drive_upload_file
+-
+gmail_find_email, gmail_create_label, gmail_add_label_to_email, gmail_archive_email
+-
+google_calendar_create_detailed_event
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+tavily_search, google_docs_create_document_from_text, google_drive_upload_file, gmail_send_email
+-
+google_calendar_find_events, google_calendar_delete_event, gmail_send_email
+-
+github_find_issue, github_create_comment, slack_send_channel_message
+-
+google_drive_find_a_file, google_drive_get_file_permissions, google_drive_add_file_sharing_preference
+-
+gmail_send_email
+-
+github_create_branch, github_create_pull_request, slack_send_channel_message
+-
+google_docs_find_a_document, google_docs_find_and_replace_text, gmail_send_email
+-
+zoom_find_meeting_webinar, zoom_create_meeting_registrant, gmail_send_email

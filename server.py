@@ -4,8 +4,6 @@ import os
 import json
 import sys
 import threading
-import urllib.request
-import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
@@ -43,6 +41,9 @@ agent_dir = Path(__file__).parent / "agent"
 sys.path.insert(0, str(agent_dir))
 
 from agent import LangGraphAgent
+
+# Import EMA
+from EMA import EMA
 
 HOST = "localhost"  # listen on all interfaces
 
@@ -84,6 +85,9 @@ log_to_file(f"DEBUG: ZAPIER_AUTHORIZATION_TOKEN loaded: {zapier_token[:20] + '..
 # Initialize agent once at module level - MUST be declared before get_agent() is defined
 _agent = None
 
+# Initialize EMA once at module level
+_ema = None
+
 
 def get_agent():
     """Get or initialize the agent instance."""
@@ -97,6 +101,83 @@ def get_agent():
             print(f"Warning: Failed to initialize agent: {e}")
             log_to_file(f"ERROR: Failed to initialize agent: {e}")
     return _agent
+
+
+def get_ema():
+    """Get or initialize the EMA instance."""
+    global _ema
+    if _ema is None:
+        try:
+            # Create containers directory
+            containers_dir = server_dir / "containers"
+            containers_dir.mkdir(exist_ok=True)
+            
+            # Initialize EMA with containers directory
+            _ema = EMA(k=10, t=50, nr=2, nf=5, ns=5, containers_dir=containers_dir)
+            print("EMA initialized successfully")
+            log_to_file("EMA initialized successfully")
+        except Exception as e:
+            print(f"Warning: Failed to initialize EMA: {e}")
+            log_to_file(f"ERROR: Failed to initialize EMA: {e}")
+    return _ema
+
+
+def load_showcase_patterns():
+    """Load pattern blocks from recommendation_showcase_patterns.txt and populate EMA containers."""
+    try:
+        ema = get_ema()
+        if not ema:
+            log_to_file("ERROR: EMA not initialized, cannot load showcase patterns")
+            print("ERROR: EMA not initialized, cannot load showcase patterns")
+            return False
+        
+        patterns_file = server_dir / "recommendation_showcase_patterns.txt"
+        
+        if not patterns_file.exists():
+            log_to_file(f"Warning: Showcase patterns file not found at {patterns_file}")
+            print(f"Warning: Showcase patterns file not found at {patterns_file}")
+            return False
+        
+        # Load pattern blocks from file, skipping empty lines and separators
+        blocks = []
+        with open(patterns_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and separator lines (just dashes)
+                if line and line != '-':
+                    blocks.append(line)
+        
+        if not blocks:
+            log_to_file("No blocks found in showcase patterns file")
+            print("No blocks found in showcase patterns file")
+            return False
+        
+        log_to_file(f"Loading {len(blocks)} blocks from showcase patterns file")
+        print(f"Loading {len(blocks)} blocks from showcase patterns file...")
+        
+        # Add all blocks to EMA
+        for block in blocks:
+            ema.add_block(block)
+        
+        # Save EMA containers to JSON files
+        save_success = ema.save_containers()
+        if save_success:
+            log_to_file(f"Successfully loaded {len(blocks)} showcase patterns into EMA containers")
+            print(f"✓ Successfully loaded {len(blocks)} showcase patterns into EMA containers")
+        else:
+            log_to_file("Warning: Patterns loaded but failed to save containers")
+            print("Warning: Patterns loaded but failed to save containers")
+        
+        # Generate recommendations after loading patterns (regardless of save status)
+        generate_recommendations()
+        
+        return save_success
+            
+    except Exception as e:
+        error_msg = f"Error loading showcase patterns: {str(e)}"
+        log_to_file(f"ERROR: {error_msg}")
+        print(f"ERROR: {error_msg}")
+        return False
 
 
 # Thread-safe storage for current agent state
@@ -163,63 +244,166 @@ def extract_tool_names_from_state(state):
     return tool_names
 
 
-def post_tool_names(tool_names, post_url=None):
-    """POST the list of tool names to an endpoint."""
-    if not tool_names:
-        log_to_file("No tool names to post")
-        print("No tool names to post")
-        return
-    
-    # Default URL if not provided (configurable via environment variable)
-    if post_url is None:
-        # Check for environment variable first
-        post_url = os.getenv("TOOLS_POST_URL")
-        if not post_url:
-            # Use the same port as the server
-            post_url = f"http://localhost:8080/api/tools"
-    
-    payload = {
-        "steps": tool_names
-    }
-    
-    json_data = json.dumps(payload).encode("utf-8")
-    
-    # Log before posting
-    log_message = f"About to POST tool names: {json.dumps(payload, indent=2)}"
-    print(f"\n=== {log_message} ===")
-    log_to_file(log_message)
-    log_to_file(f"POST URL: {post_url}")
+def load_tool_descriptions():
+    """Load tool descriptions from zapier_tools.json into a dictionary."""
+    tools_file = server_dir / "dataset" / "zapier_tools.json"
+    tool_descriptions = {}
     
     try:
-        req = urllib.request.Request(
-            post_url,
-            data=json_data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
+        if tools_file.exists():
+            with open(tools_file, "r", encoding="utf-8") as f:
+                tools = json.load(f)
+                for tool in tools:
+                    tool_name = tool.get("name", "")
+                    description = tool.get("description", "")
+                    tool_descriptions[tool_name] = description
+        else:
+            log_to_file(f"Warning: zapier_tools.json not found at {tools_file}")
+            print(f"Warning: zapier_tools.json not found at {tools_file}")
+    except Exception as e:
+        log_to_file(f"ERROR loading tool descriptions: {str(e)}")
+        print(f"ERROR loading tool descriptions: {str(e)}")
+    
+    return tool_descriptions
+
+
+def remove_zapier_prefix(tool_name):
+    """Remove 'zapier_' prefix from tool name if present."""
+    if tool_name.startswith("zapier_"):
+        return tool_name[7:]  # Remove "zapier_" (7 characters)
+    return tool_name
+
+
+def get_tool_description(tool_name, tool_descriptions):
+    """Get tool description, handling zapier_ prefix removal."""
+    # Remove prefix for lookup
+    lookup_name = remove_zapier_prefix(tool_name)
+    return tool_descriptions.get(lookup_name, f"No description available for {tool_name}")
+
+
+def generate_recommendations():
+    """Generate recommendation JSON files from EMA pick functions."""
+    try:
+        ema = get_ema()
+        if not ema:
+            log_to_file("ERROR: EMA not initialized for recommendations")
+            print("ERROR: EMA not initialized for recommendations")
+            return False
         
-        with urllib.request.urlopen(req, timeout=10) as response:
-            response_data = response.read().decode("utf-8")
-            log_to_file(f"POST successful. Response: {response_data}")
-            print(f"POST successful. Response: {response_data}")
+        # Load tool descriptions
+        tool_descriptions = load_tool_descriptions()
+        
+        # Create recommendations directory
+        recommendations_dir = server_dir / "recommendations"
+        recommendations_dir.mkdir(exist_ok=True)
+        
+        # Generate recent tools combo files (nr files) using pick_from_recent()
+        recent_selections = ema.pick_from_recent()
+        for i, selection in enumerate(recent_selections, 1):
+            tool_names = selection.get("names", "").split(", ")
+            recommendations = []
             
-    except urllib.error.HTTPError as e:
-        error_msg = f"HTTP error posting tool names: {e.code} - {e.reason}"
-        log_to_file(f"ERROR: {error_msg}")
-        print(f"ERROR: {error_msg}")
-        if e.fp:
-            error_body = e.fp.read().decode("utf-8")
-            log_to_file(f"Error response body: {error_body}")
+            for tool_name in tool_names:
+                tool_name = tool_name.strip()
+                if tool_name:
+                    description = get_tool_description(tool_name, tool_descriptions)
+                    recommendations.append({
+                        "tool_name": tool_name,
+                        "description": description
+                    })
             
-    except urllib.error.URLError as e:
-        error_msg = f"URL error posting tool names: {e.reason}"
-        log_to_file(f"ERROR: {error_msg}")
-        print(f"ERROR: {error_msg}")
+            if recommendations:
+                filename = recommendations_dir / f"recent_tools_combo_{i}.json"
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(recommendations, f, indent=2)
+                log_to_file(f"Generated {filename}")
+        
+        # Generate recent tool single files (ns files) using get_recent_single_tools()
+        single_tools = ema.get_recent_single_tools()
+        for i, tool_name in enumerate(single_tools, 1):
+            if tool_name:
+                description = get_tool_description(tool_name, tool_descriptions)
+                recommendation = [{
+                    "tool_name": tool_name,
+                    "description": description
+                }]
+                
+                filename = recommendations_dir / f"recent_tool_single_{i}.json"
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(recommendation, f, indent=2)
+                log_to_file(f"Generated {filename}")
+        
+        # Generate stable tools combo files (nf files) using pick_from_frequency()
+        frequency_selections = ema.pick_from_frequency()
+        for i, selection in enumerate(frequency_selections, 1):
+            tool_names = selection.get("names", "").split(", ")
+            recommendations = []
+            
+            for tool_name in tool_names:
+                tool_name = tool_name.strip()
+                if tool_name:
+                    description = get_tool_description(tool_name, tool_descriptions)
+                    recommendations.append({
+                        "tool_name": tool_name,
+                        "description": description
+                    })
+            
+            if recommendations:
+                filename = recommendations_dir / f"stable_tools_combo_{i}.json"
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(recommendations, f, indent=2)
+                log_to_file(f"Generated {filename}")
+        
+        print(f"✓ Generated recommendation files in {recommendations_dir}")
+        log_to_file(f"Generated recommendation files successfully")
+        return True
         
     except Exception as e:
-        error_msg = f"Unexpected error posting tool names: {str(e)}"
+        error_msg = f"Error generating recommendations: {str(e)}"
         log_to_file(f"ERROR: {error_msg}")
         print(f"ERROR: {error_msg}")
+        return False
+
+
+def update_ema_containers(tool_names):
+    """Update EMA containers directly with tool names and save to JSON files."""
+    if not tool_names:
+        log_to_file("No tool names to update EMA with")
+        print("No tool names to update EMA with")
+        return False
+    
+    try:
+        ema = get_ema()
+        if not ema:
+            log_to_file("ERROR: EMA not initialized")
+            print("ERROR: EMA not initialized")
+            return False
+        
+        # Convert steps list to a comma-separated block string
+        block = ", ".join(tool_names)
+        
+        # Add block to EMA
+        ema.add_block(block)
+        
+        # Save EMA containers to JSON files
+        if ema.save_containers():
+            log_to_file(f"Updated EMA with {len(tool_names)} tools and saved containers: {tool_names}")
+            print(f"✓ Updated EMA with {len(tool_names)} tools and saved containers")
+            
+            # Generate recommendations after updating EMA
+            generate_recommendations()
+            
+            return True
+        else:
+            log_to_file(f"Warning: EMA updated but failed to save containers")
+            print(f"Warning: EMA updated but failed to save containers")
+            return False
+            
+    except Exception as e:
+        error_msg = f"Error updating EMA containers: {str(e)}"
+        log_to_file(f"ERROR: {error_msg}")
+        print(f"ERROR: {error_msg}")
+        return False
 
 
 def run_agent_async(command, feedback, app):
@@ -267,12 +451,12 @@ def run_agent_async(command, feedback, app):
             if final_state:
                 set_agent_state(final_state)
                 
-                # Extract and post tool names after agent finishes
+                # Extract and update EMA containers with tool names after agent finishes
                 tool_names = extract_tool_names_from_state(final_state)
                 if tool_names:
                     log_to_file(f"Agent finished. Extracted {len(tool_names)} tool names: {tool_names}")
                     print(f"\n=== Agent finished. Extracted {len(tool_names)} tool names ===")
-                    post_tool_names(tool_names)
+                    update_ema_containers(tool_names)
                 else:
                     log_to_file("Agent finished but no tool names found in completed steps")
                     print("Agent finished but no tool names found in completed steps")
@@ -345,13 +529,38 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
                 
                 # Check if this is a tools POST (has 'steps' field) - typically at /api/tools
                 if "steps" in data or self.path == "/api/tools":
-                    # This is a POST with tool names
+                    # This is a POST with tool names (for manual updates or backward compatibility)
                     steps = data.get("steps", [])
                     log_to_file(f"Received tool names POST at {self.path}: {json.dumps(data, indent=2)}")
                     print(f"\n=== Received tool names POST ===")
                     print(f"Path: {self.path}")
                     print(f"Steps: {steps}")
-                    response_message = f"Received {len(steps)} tool names"
+                    
+                    # Save tool names to a text file
+                    try:
+                        # Save to dataset/agent_tool_names.txt (relative to server.py location)
+                        dataset_dir = server_dir / "dataset"
+                        dataset_dir.mkdir(exist_ok=True)  # Create directory if it doesn't exist
+                        tools_file = dataset_dir / "agent_tool_names.txt"
+                        
+                        # Write tool names, one per line
+                        with open(tools_file, "w", encoding="utf-8") as f:
+                            for tool_name in steps:
+                                f.write(f"{tool_name}\n")
+                        
+                        print(f"✓ Saved {len(steps)} tool names to {tools_file}")
+                        log_to_file(f"Saved {len(steps)} tool names to {tools_file}")
+                        response_message = f"Received and saved {len(steps)} tool names to {tools_file.name}"
+                    except Exception as save_error:
+                        error_msg = f"Error saving tool names: {str(save_error)}"
+                        print(f"ERROR: {error_msg}")
+                        log_to_file(f"ERROR: {error_msg}")
+                        response_message = f"Received {len(steps)} tool names but failed to save: {str(save_error)}"
+                    
+                    # Update EMA containers directly
+                    if update_ema_containers(steps):
+                        response_message += f" | EMA containers updated and saved"
+                    
                     log_to_file(f"Tool names received: {steps}")
                 
                 # Check if this is Format 2 (has 'input' field)
@@ -442,7 +651,19 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
 
 @click.command()
 @click.option('-p', '--port', default=8080, type=int, help='Port to listen on')
-def main(port):
+@click.option('--load-showcase', is_flag=True, default=False, help='Load showcase patterns into EMA containers on startup')
+def main(port, load_showcase):
+    # Initialize EMA first
+    get_ema()
+    
+    # Load showcase patterns if enabled
+    if load_showcase:
+        load_showcase_patterns()
+    else:
+        # Check environment variable as alternative
+        if os.getenv("LOAD_SHOWCASE_PATTERNS", "").lower() in ("true", "1", "yes"):
+            load_showcase_patterns()
+    
     server = HTTPServer((HOST, port), SimpleRequestHandler)
     print(f"Listening on http://{HOST}:{port}")
     try:
