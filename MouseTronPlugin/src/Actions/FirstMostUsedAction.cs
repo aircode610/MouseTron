@@ -4,7 +4,7 @@ namespace Loupedeck.MouseTronPlugin
     using System.Threading.Tasks;
 
     // This class implements a command that sends selected text and user input via POST request
-    public class FirstRecentAction : PluginDynamicCommand
+    public class FirstMostUsedAction : PluginDynamicCommand
     {
         // Default port fallback if server port is not available
         private const Int32 DefaultPort = 8080;
@@ -22,7 +22,7 @@ namespace Loupedeck.MouseTronPlugin
 
                 if (parentDirectory != null)
                 {
-                    var jsonPath = System.IO.Path.Combine(parentDirectory, "recommendations/recent_tool_single_1.json"); // Assuming file name is recent.json
+                    var jsonPath = System.IO.Path.Combine(parentDirectory, "recommendations/stable_tools_combo_1.json"); // Assuming file name is recent.json
                     PluginLog.Info($"Reading recent action from: {jsonPath}, which exists: {System.IO.File.Exists(jsonPath)}");
                     if (System.IO.File.Exists(jsonPath))
                     {
@@ -86,7 +86,7 @@ namespace Loupedeck.MouseTronPlugin
                                 PluginLog.Warning($"Unexpected JSON root type: {root.ValueKind}");
                             }
                         }
-                        PluginLog.Info($"Recent name: '{com_name}' and description: '{com_description}'");
+                        PluginLog.Info($"Most used name: '{com_name}' and description: '{com_description}'");
                     }
                 }
                 
@@ -94,14 +94,14 @@ namespace Loupedeck.MouseTronPlugin
             catch (Exception ex)
             {
                 // Log error but don't crash
-                PluginLog.Warning($"Failed to update recent action: {ex.Message}");
+                PluginLog.Warning($"Failed to update most used action: {ex.Message}");
             }
             
         }
 
         // Initializes the command class.
-        public FirstRecentAction()
-            : base(displayName: "Most Recent Action", description: "The most recent action done by user", groupName: "HTTP Actions")
+        public FirstMostUsedAction()
+            : base(displayName: "Most Used Action", description: "The most used action by user", groupName: "HTTP Actions")
         {
             UpdateRecent();
         }
@@ -118,7 +118,7 @@ namespace Loupedeck.MouseTronPlugin
             try
             {
                 // Show input dialog to get user input (platform-specific)
-                var userInput = SystemInfo.ShowInputDialog("Enter Input", $"The most recent action is: {com_description}\n" +
+                var userInput = SystemInfo.ShowInputDialog("Enter Input", $"The most used action is: {com_description}\n" +
                                                                           $"Please enter additional text:", String.Empty);
                 
                 // If user cancelled the dialog, return

@@ -78,7 +78,7 @@ namespace Loupedeck.MouseTronPlugin
                 
                 PluginLog.Info($"Sending selected text: '{selectedText}' from application '{applicationName}' with user input: '{userInput}'");
 
-                FirstRecentAction.UpdateRecent();
+                MouseTronPlugin.UpdateAllActions();
                 
                 // Get URL from plugin settings or use default
                 var postUrl = this.GetPostUrl();

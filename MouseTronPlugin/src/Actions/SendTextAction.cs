@@ -72,7 +72,7 @@ namespace Loupedeck.MouseTronPlugin
                 // Get URL from plugin settings or use default
                 var postUrl = this.GetPostUrl();
                 
-                FirstRecentAction.UpdateRecent();
+                MouseTronPlugin.UpdateAllActions();
                 
                 var success = await HttpClientHelper.SendPostRequestAsync(postUrl, selectedText, applicationName);
 
