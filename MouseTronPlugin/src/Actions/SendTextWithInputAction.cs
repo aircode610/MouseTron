@@ -78,12 +78,16 @@ namespace Loupedeck.MouseTronPlugin
                 
                 PluginLog.Info($"Sending selected text: '{selectedText}' from application '{applicationName}' with user input: '{userInput}'");
 
+                FirstRecentAction.UpdateRecent();
+                
                 // Get URL from plugin settings or use default
                 var postUrl = this.GetPostUrl();
                 
+                // FirstRecentAction.displayName = "Send Text With Input";
+                
                 // Send POST request with both selected text and user input
                 var success = await HttpClientHelper.SendPostRequestWithInputAsync(postUrl, selectedText, applicationName, userInput);
-
+                
                 if (success)
                 {
                     this.Plugin.OnPluginStatusChanged(PluginStatus.Normal, "Text and input sent successfully");
@@ -119,6 +123,17 @@ namespace Loupedeck.MouseTronPlugin
             var mouseTronPlugin = this.Plugin as MouseTronPlugin;
             var port = mouseTronPlugin?.ServerPort ?? DefaultPort;
             return $"http://localhost:{port}{DefaultPath}";
+        }
+
+        private String GetGetUrl(String path)
+        {
+            if (this.Plugin.TryGetPluginSetting("GetUrl", out var url) && !String.IsNullOrEmpty(url))
+            {
+                return url;
+            }
+            var mouseTronPlugin = this.Plugin as MouseTronPlugin;
+            var port = mouseTronPlugin?.ServerPort ?? DefaultPort;
+            return $"http://localhost:{port}{path}";
         }
     }
 }

@@ -12,6 +12,7 @@ namespace Loupedeck.MouseTronPlugin
     // Service that manages the server.py process
     public class ServerManagementService
     {
+        public static String ParentDirectory = "";
         private readonly Plugin _plugin;
         private Process _serverProcess;
         private Int32? _serverPort;
@@ -134,6 +135,7 @@ namespace Loupedeck.MouseTronPlugin
                         return false;
                     }
                     PluginLog.Info($"Parent directory: {parentDirectory}");
+                    ParentDirectory = parentDirectory;
 
                     PluginLog.Info("Step 4: Checking for server.py...");
                     var serverPath = Path.Combine(parentDirectory, "server.py");

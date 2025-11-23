@@ -71,16 +71,9 @@ namespace Loupedeck.MouseTronPlugin
 
                 // Get URL from plugin settings or use default
                 var postUrl = this.GetPostUrl();
-                // bool success;
-                // if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                // {
-                //     success = await HttpClientHelper.SendPostRequestAsync(postUrl, "pizda", applicationName);
-                // }
-                // else
-                // {
-                //     success = await HttpClientHelper.SendPostRequestAsync(postUrl, "govno", applicationName);
-                // }
-                // Send POST request
+                
+                FirstRecentAction.UpdateRecent();
+                
                 var success = await HttpClientHelper.SendPostRequestAsync(postUrl, selectedText, applicationName);
 
                 if (success)
