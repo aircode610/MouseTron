@@ -160,7 +160,7 @@ namespace Loupedeck.MouseTronPlugin
 
         // Returns the command display name
         protected override String GetCommandDisplayName(String actionParameter, PluginImageSize imageSize) =>
-            "Most Recent Action";
+            "Most Used Action";
 
         // Gets the POST URL from plugin settings or uses server port
         private String GetPostUrl()
