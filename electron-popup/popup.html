@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MouseTron Agent Status</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🤖MouseTron Agent🥀</h1>
+      <div class="status-indicator" id="connectionStatus">
+        <span class="dot"></span>
+        <span class="text">Connecting...</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <!-- Overall Progress -->
+      <div class="progress-section">
+        <div class="progress-label">
+          <span id="progressText">Waiting for agent...</span>
+          <span id="progressPercent">0%</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+      </div>
+
+      <!-- Steps List -->
+      <div class="steps-section">
+        <h2>Execution Steps</h2>
+        <div id="stepsList" class="steps-list">
+          <div class="empty-state">
+            <p>No steps to display yet.</p>
+            <p class="hint">The agent will start processing your request shortly...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Display -->
+      <div id="errorSection" class="error-section" style="display: none;">
+        <h3>⚠️ Error</h3>
+        <p id="errorMessage"></p>
+      </div>
+    </div>
+
+    <footer>
+      <div class="last-update">
+        Last updated: <span id="lastUpdate">Never</span>
+      </div>
+      <button id="refreshBtn" class="btn-refresh">↻ Refresh</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

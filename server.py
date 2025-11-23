@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import subprocess
 import click
 import os
 import json
@@ -8,6 +9,104 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
+
+global_port = 8080
+
+# Add near the top after other imports
+def launch_electron_popup(port):
+    """Launch the Electron popup with the correct API URL."""
+    electron_dir = Path(__file__).parent / "electron-popup"
+
+    if not electron_dir.exists():
+        print(f"ERROR: Electron popup directory not found at {electron_dir}")
+        log_to_file(f"ERROR: Electron popup directory not found at {electron_dir}")
+        return False
+
+    api_url = f"http://localhost:{port}"
+
+    try:
+        # Find npm in common locations
+        npm_path = None
+        possible_npm_paths = [
+            '/usr/local/bin/npm',
+            '/opt/homebrew/bin/npm',
+            '/usr/bin/npm',
+        ]
+
+        # Also check with 'which npm'
+        try:
+            result = subprocess.run(['which', 'npm'], capture_output=True, text=True, shell=False)
+            if result.returncode == 0 and result.stdout.strip():
+                npm_path = result.stdout.strip()
+        except:
+            pass
+
+        # If 'which' didn't work, try the hardcoded paths
+        if not npm_path:
+            for path in possible_npm_paths:
+                if os.path.exists(path):
+                    npm_path = path
+                    break
+
+        if not npm_path:
+            error_msg = "npm not found. Please install Node.js and npm."
+            print(f"ERROR: {error_msg}")
+            log_to_file(f"ERROR: {error_msg}")
+            return False
+
+        print(f"DEBUG: Found npm at: {npm_path}")
+        log_to_file(f"DEBUG: Found npm at: {npm_path}")
+
+        # Set environment variable
+        env = os.environ.copy()
+        env['API_URL'] = api_url
+
+        # Add common paths to PATH environment variable
+        extra_paths = ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin']
+        current_path = env.get('PATH', '')
+        env['PATH'] = ':'.join(extra_paths) + ':' + current_path
+
+        print(f"Launching Electron popup with API_URL={api_url}")
+        log_to_file(f"Launching Electron popup with API_URL={api_url}")
+
+        # Use the full path to npm
+        process = subprocess.Popen(
+            [npm_path, 'start'],
+            cwd=str(electron_dir),
+            env=env,
+            shell=False,  # Don't use shell
+            start_new_session=False
+        )
+
+        print(f"Electron popup launched successfully (PID: {process.pid})")
+        log_to_file(f"Electron popup launched successfully (PID: {process.pid})")
+
+        # Wait a bit to see if there are immediate errors
+        import time
+        time.sleep(2)
+
+        # Check if process is still running
+        if process.poll() is not None:
+            print(f"WARNING: Electron process exited immediately with code {process.returncode}")
+            log_to_file(f"WARNING: Electron process exited immediately with code {process.returncode}")
+            return False
+
+        return True
+
+    except FileNotFoundError as e:
+        error_msg = f"npm not found: {e}. Please install Node.js and npm first."
+        print(f"ERROR: {error_msg}")
+        log_to_file(f"ERROR: {error_msg}")
+        return False
+
+    except Exception as e:
+        error_msg = f"Failed to launch Electron popup: {str(e)}"
+        print(f"ERROR: {error_msg}")
+        log_to_file(f"ERROR: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 # Load environment variables from .env file BEFORE importing agent
 from dotenv import load_dotenv
@@ -338,7 +437,9 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
         
         # Get agent instance for Format 2 requests
         agent = get_agent()
-        
+
+        launch_electron_popup(global_port)
+
         if body_decoded and body_decoded != "<binary data>":
             try:
                 data = json.loads(body_decoded)
@@ -443,8 +544,10 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
 @click.command()
 @click.option('-p', '--port', default=8080, type=int, help='Port to listen on')
 def main(port):
-    server = HTTPServer((HOST, port), SimpleRequestHandler)
-    print(f"Listening on http://{HOST}:{port}")
+    global global_port
+    global_port = port
+    server = HTTPServer((HOST, global_port), SimpleRequestHandler)
+    print(f"Listening on http://{HOST}:{global_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
