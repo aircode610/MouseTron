@@ -110,6 +110,20 @@ namespace Loupedeck.MouseTronPlugin
         protected override String GetCommandDisplayName(String actionParameter, PluginImageSize imageSize) =>
             "Send Text With Input";
 
+        // Returns the command icon image
+        protected override BitmapImage GetCommandImage(String actionParameter, PluginImageSize imageSize)
+        {
+            try
+            {
+                return PluginResources.ReadImage("SendTextWithInputIcon.png");
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Warning($"Failed to load icon for SendTextWithInputAction: {ex.Message}");
+                return null;
+            }
+        }
+
         // Gets the POST URL from plugin settings or uses server port
         private String GetPostUrl()
         {

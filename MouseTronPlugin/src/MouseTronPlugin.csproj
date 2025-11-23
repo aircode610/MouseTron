@@ -30,6 +30,22 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Embedded Resources for Action Icons -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/SendTextIcon.png">
+      <LogicalName>SendTextIcon.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources/SendTextWithInputIcon.png">
+      <LogicalName>SendTextWithInputIcon.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources/MostRecentActionIcon.png">
+      <LogicalName>MostRecentActionIcon.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources/MostUsedActionIcon.png">
+      <LogicalName>MostUsedActionIcon.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <Target Name="CopyPackage" AfterTargets="PostBuildEvent">
     <Message Text="📦 Copying package files..." Importance="High" />
     <ItemGroup>

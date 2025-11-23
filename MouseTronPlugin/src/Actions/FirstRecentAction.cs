@@ -162,6 +162,20 @@ namespace Loupedeck.MouseTronPlugin
         protected override String GetCommandDisplayName(String actionParameter, PluginImageSize imageSize) =>
             "Most Recent Action";
 
+        // Returns the command icon image
+        protected override BitmapImage GetCommandImage(String actionParameter, PluginImageSize imageSize)
+        {
+            try
+            {
+                return PluginResources.ReadImage("MostRecentActionIcon.png");
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Warning($"Failed to load icon for FirstRecentAction: {ex.Message}");
+                return null;
+            }
+        }
+
         // Gets the POST URL from plugin settings or uses server port
         private String GetPostUrl()
         {
