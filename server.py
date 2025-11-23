@@ -388,44 +388,7 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
                 elif "input" in data and agent is None:
                     response_message = "Agent not initialized. Check server logs."
                     response_status = 500
-                    log_to_file("ERROR: Format 2 POST received but agent is not initialized")
-                
-                # Check if this is Format 1 (has 'selectedText' but no 'input' field)
-                elif "selectedText" in data and "input" not in data and agent is not None:
-                    selected_text = data.get("selectedText", "")
-                    application_name = data.get("applicationName", "Unknown")
-                    # Use empty string for feedback when no input is provided
-                    user_input = ""
-                    
-                    print(f"\n=== Format 1 POST detected (no input) ===")
-                    print(f"Command: {selected_text[:100]}...")
-                    print(f"App: {application_name}")
-                    print(f"Running agent without input...\n")
-                    
-                    log_to_file("=== Format 1 POST - Running agent without input ===")
-                    log_to_file(f"Command: {selected_text}")
-                    log_to_file(f"App: {application_name}")
-                    log_to_file(f"Feedback: (empty)")
-                    
-                    try:
-                        # Run the agent in a background thread with empty feedback
-                        run_agent_async(selected_text, user_input, application_name)
-                        response_message = "Agent started. Check /api/steps for status."
-                        log_to_file("Agent started in background thread (no input)")
-                        print(f"\n=== Agent started in background (no input) ===")
-                        
-                    except Exception as e:
-                        error_msg = f"Error starting agent: {str(e)}"
-                        print(f"\n=== ERROR: {error_msg} ===")
-                        log_to_file(f"ERROR: {error_msg}")
-                        response_message = f"Error: {str(e)}"
-                        response_status = 500
-                
-                elif "selectedText" in data and "input" not in data and agent is None:
-                    response_message = "Agent not initialized. Check server logs."
-                    response_status = 500
-                    log_to_file("ERROR: Format 1 POST received but agent is not initialized")
-                    
+                    log_to_file("ERROR: Format 2 POST received but agent is not initialized")                    
             except json.JSONDecodeError as e:
                 print(f"Failed to parse JSON: {e}")
                 log_to_file(f"Failed to parse JSON: {e}")
