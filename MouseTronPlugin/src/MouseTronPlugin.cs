@@ -6,6 +6,12 @@ namespace Loupedeck.MouseTronPlugin
 
     public class MouseTronPlugin : Plugin
     {
+        public static void UpdateAllActions()
+        {
+            FirstRecentAction.UpdateRecent();
+            FirstMostUsedAction.UpdateRecent();
+        }
+        
         private ServerManagementService _serverService;
 
         // Gets a value indicating whether this is an API-only plugin.
