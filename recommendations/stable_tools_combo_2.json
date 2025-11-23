@@ -1,0 +1,14 @@
+[
+  {
+    "tool_name": "tavily_search",
+    "description": "Search the web and return answers using Tavily"
+  },
+  {
+    "tool_name": "google_docs_create_document_from_text",
+    "description": "Create a new document from text. Also supports limited HTML."
+  },
+  {
+    "tool_name": "gmail_send_email",
+    "description": "Create and send a new email message."
+  }
+]

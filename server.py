@@ -396,6 +396,13 @@ def generate_recommendations():
         recommendations_dir = server_dir / "recommendations"
         recommendations_dir.mkdir(exist_ok=True)
         
+        # Update frequency table before picking (ensures it's up to date)
+        ema._update_frequency_table()
+        
+        # Evict entries if frequency table exceeds max size t
+        if len(ema.frequency_table) > ema.t:
+            ema._evict_from_frequency_table()
+        
         # Generate recent tools combo files (nr files) using pick_from_recent()
         recent_selections = ema.pick_from_recent()
         for i, selection in enumerate(recent_selections, 1):
@@ -434,6 +441,9 @@ def generate_recommendations():
         
         # Generate stable tools combo files (nf files) using pick_from_frequency()
         frequency_selections = ema.pick_from_frequency()
+        log_to_file(f"Found {len(frequency_selections)} stable tool combinations (requested {ema.nf})")
+        print(f"Found {len(frequency_selections)} stable tool combinations (requested {ema.nf})")
+        
         for i, selection in enumerate(frequency_selections, 1):
             tool_names = selection.get("names", "").split(", ")
             recommendations = []
@@ -755,14 +765,8 @@ class SimpleRequestHandler(BaseHTTPRequestHandler):
 def main(port):
     # Initialize EMA first
     get_ema()
-    
     # Load showcase patterns if enabled
-    if load_showcase:
-        load_showcase_patterns()
-    else:
-        # Check environment variable as alternative
-        if os.getenv("LOAD_SHOWCASE_PATTERNS", "").lower() in ("true", "1", "yes"):
-            load_showcase_patterns()
+    load_showcase_patterns()
 
     global global_port
     global_port = port

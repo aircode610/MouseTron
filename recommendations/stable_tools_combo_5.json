@@ -1,0 +1,10 @@
+[
+  {
+    "tool_name": "tavily_search",
+    "description": "Search the web and return answers using Tavily"
+  },
+  {
+    "tool_name": "google_docs_create_document_from_text",
+    "description": "Create a new document from text. Also supports limited HTML."
+  }
+]
