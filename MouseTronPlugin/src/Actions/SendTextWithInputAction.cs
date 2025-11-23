@@ -8,7 +8,7 @@ namespace Loupedeck.MouseTronPlugin
     {
         // Default port fallback if server port is not available
         private const Int32 DefaultPort = 8080;
-        private const String DefaultPath = "/api/input/";
+        private const String DefaultPath = "/";
 
         // Initializes the command class.
         public SendTextWithInputAction()
@@ -78,8 +78,18 @@ namespace Loupedeck.MouseTronPlugin
                 
                 PluginLog.Info($"Sending selected text: '{selectedText}' from application '{applicationName}' with user input: '{userInput}'");
 
+                // Check if server is running
+                var mouseTronPlugin = this.Plugin as MouseTronPlugin;
+                if (mouseTronPlugin?.ServerPort == null)
+                {
+                    PluginLog.Error("Server is not running. Cannot send request.");
+                    this.Plugin.OnPluginStatusChanged(PluginStatus.Error, "Server not running. Please restart the plugin.");
+                    return;
+                }
+
                 // Get URL from plugin settings or use default
                 var postUrl = this.GetPostUrl();
+                PluginLog.Info($"POST URL: {postUrl}");
                 
                 // Send POST request with both selected text and user input
                 var success = await HttpClientHelper.SendPostRequestWithInputAsync(postUrl, selectedText, applicationName, userInput);
@@ -117,8 +127,17 @@ namespace Loupedeck.MouseTronPlugin
 
             // Otherwise, use the server port from ServerManagementService
             var mouseTronPlugin = this.Plugin as MouseTronPlugin;
-            var port = mouseTronPlugin?.ServerPort ?? DefaultPort;
-            return $"http://localhost:{port}{DefaultPath}";
+            var port = mouseTronPlugin?.ServerPort;
+            
+            if (port == null)
+            {
+                PluginLog.Warning("Server port is not available. Server may not be running.");
+                this.Plugin.OnPluginStatusChanged(PluginStatus.Error, "Server not running. Please restart the plugin.");
+                // Still return a URL with default port in case server is manually started on 8080
+                return $"http://localhost:{DefaultPort}{DefaultPath}";
+            }
+            
+            return $"http://localhost:{port.Value}{DefaultPath}";
         }
     }
 }

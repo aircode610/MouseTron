@@ -116,8 +116,17 @@ namespace Loupedeck.MouseTronPlugin
 
             // Otherwise, use the server port from ServerManagementService
             var mouseTronPlugin = this.Plugin as MouseTronPlugin;
-            var port = mouseTronPlugin?.ServerPort ?? DefaultPort;
-            return $"http://localhost:{port}{DefaultPath}";
+            var port = mouseTronPlugin?.ServerPort;
+            
+            if (port == null)
+            {
+                PluginLog.Warning("Server port is not available. Server may not be running.");
+                this.Plugin.OnPluginStatusChanged(PluginStatus.Error, "Server not running. Please restart the plugin.");
+                // Still return a URL with default port in case server is manually started on 8080
+                return $"http://localhost:{DefaultPort}{DefaultPath}";
+            }
+            
+            return $"http://localhost:{port.Value}{DefaultPath}";
         }
     }
 }
