@@ -17,15 +17,15 @@ MouseTron consists of three main components:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Logitech Loupedeck Plugin (C#)           │
-│  - Tracks selected text from applications                    │
+│  - Tracks selected text from applications                   │
 │  - Sends commands to Python server                          │
-│  - Displays recommendations from EMA                         │
-│  - Manages server lifecycle                                  │
+│  - Displays recommendations from EMA                        │
+│  - Manages server lifecycle                                 │
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTP POST/GET
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Python Server (server.py)                 │
+│                    Python Server (server.py)                │
 │  - Receives commands from plugin                            │
 │  - Orchestrates agent execution                             │
 │  - Updates EMA with tool usage patterns                     │
@@ -33,10 +33,10 @@ MouseTron consists of three main components:
 └──────────────────────┬──────────────────────────────────────┘
                        │
         ┌──────────────┴──────────────┐
-        │                            │
-        ▼                            ▼
+        │                             │
+        ▼                             ▼
 ┌──────────────┐            ┌──────────────────┐
-│   Agent      │            │   EMA Algorithm   │
+│   Agent      │            │   EMA Algorithm  │
 │ (agent.py)   │            │    (EMA.py)      │
 │              │            │                  │
 │ - Plans      │            │ - Tracks patterns│
