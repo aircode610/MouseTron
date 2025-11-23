@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     execution_context: Dict[str, Any]
     validation_feedback: Optional[str]  # Feedback from validation node
     planning_iterations: int  # Track how many times we've planned
+    available_tools: Optional[List[Dict[str, Any]]]  # List of available tools with schemas
 
 
 class LangGraphAgent:
@@ -64,8 +65,133 @@ class LangGraphAgent:
         ]
         self.graph = self._build_graph()
     
-    def _get_system_prompt(self, app: Optional[str] = None) -> str:
-        """Generate system prompt with optional app context."""
+    @traceable(name="fetch_tools")
+    def fetch_tools(self, state: AgentState) -> AgentState:
+        """Fetch available tools from MCP server and store in state."""
+        # Check if tools are already fetched
+        if state.get("available_tools"):
+            print("✓ Tools already fetched, using cached tools")
+            return state
+        
+        print("Fetching available tools from MCP server...")
+        
+        try:
+            # Use a prompt that asks Claude to list all available tools
+            # The MCP server will provide tool schemas automatically
+            prompt = """List all available MCP tools from the Zapier server. 
+
+For each tool, provide a JSON object with:
+- name: the exact tool name (string)
+- description: what the tool does (string)
+- inputSchema: an object with "properties" (object mapping parameter names to their schemas) and "required" (array of required parameter names)
+
+Return ONLY a JSON array in this exact format:
+[
+  {
+    "name": "tool_name_here",
+    "description": "What this tool does",
+    "inputSchema": {
+      "properties": {
+        "param1": {"type": "string", "description": "param description"},
+        "param2": {"type": "number", "description": "param description"}
+      },
+      "required": ["param1"]
+    }
+  },
+  ...
+]
+
+Do not include any text before or after the JSON array."""
+            
+            response = self.client.beta.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=8000,
+                system="You are a helpful assistant that lists available MCP tools. Return only valid JSON arrays with tool information.",
+                messages=[{"role": "user", "content": prompt}],
+                mcp_servers=self.mcp_servers,
+                betas=["mcp-client-2025-04-04"],
+            )
+            
+            # Extract text response
+            text_content = ""
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                    text_content += block.text
+            
+            # Try to parse JSON from response
+            json_match = re.search(r'\[.*\]', text_content, re.DOTALL)
+            if json_match:
+                try:
+                    tools = json.loads(json_match.group())
+                    state["available_tools"] = tools
+                    print(f"✓ Fetched {len(tools)} tools")
+                    return state
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Failed to parse tools JSON: {e}")
+            
+            # Fallback: try to extract tool information from text
+            # Look for tool use blocks in the response
+            tools = []
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'tool_use':
+                    tool_info = {
+                        "name": getattr(block, 'name', ''),
+                        "description": f"Tool: {getattr(block, 'name', '')}",
+                        "inputSchema": getattr(block, 'input', {})
+                    }
+                    tools.append(tool_info)
+            
+            if tools:
+                state["available_tools"] = tools
+                print(f"✓ Extracted {len(tools)} tools from response")
+                return state
+            
+            # If we can't extract tools, create a minimal list
+            print("⚠ Could not extract tools from response, using empty list")
+            state["available_tools"] = []
+            
+        except Exception as e:
+            print(f"Warning: Failed to fetch tools: {e}. Continuing without tool list.")
+            state["available_tools"] = []
+        
+        return state
+    
+    def _format_tools_for_prompt(self, tools: List[Dict[str, Any]]) -> str:
+        """Format tools list into a readable string for prompts."""
+        if not tools:
+            return "No tools available."
+        
+        formatted = "Available Tools:\n"
+        for i, tool in enumerate(tools, 1):
+            name = tool.get("name", "Unknown")
+            description = tool.get("description", "No description")
+            input_schema = tool.get("inputSchema", {})
+            
+            formatted += f"\n{i}. {name}\n"
+            formatted += f"   Description: {description}\n"
+            
+            # Add input schema info
+            if input_schema:
+                properties = input_schema.get("properties", {})
+                required = input_schema.get("required", [])
+                if properties:
+                    formatted += f"   Parameters:\n"
+                    for param_name, param_info in properties.items():
+                        param_type = param_info.get("type", "string")
+                        param_desc = param_info.get("description", "")
+                        is_required = param_name in required
+                        req_marker = " (required)" if is_required else " (optional)"
+                        formatted += f"     - {param_name} ({param_type}){req_marker}: {param_desc}\n"
+        
+        return formatted
+    
+    def _get_system_prompt(self, app: Optional[str] = None, planning_mode: bool = False) -> str:
+        """Generate system prompt with optional app context.
+        
+        Args:
+            app: The app name where the command came from
+            planning_mode: If True, adds instructions to prevent tool execution during planning
+        """
         base_prompt = """You are an intelligent assistant that helps users execute tasks based on text they select from their applications. 
 
 Your role:
@@ -80,6 +206,12 @@ Your role:
             base_prompt += f"""
 
 Context: The command came from the application "{app}". Consider the typical use case and context of this application when interpreting the command and planning the execution."""
+        
+        # Add planning mode restrictions
+        if planning_mode:
+            base_prompt += """
+
+CRITICAL RESTRICTION: You are in PLANNING MODE. You can see available tools and their schemas to understand what tools exist and what parameters they require, but you MUST NOT execute any tools. Only use tool information to create a plan. Tool execution will happen in a separate execution phase."""
         
         return base_prompt
     
@@ -253,8 +385,8 @@ Guidelines:
         feedback = state.get("feedback")
         app = state.get("app")
         
-        # Get system prompt with app context
-        system_prompt = self._get_system_prompt(app)
+        # Get system prompt with app context and planning mode restrictions
+        system_prompt = self._get_system_prompt(app, planning_mode=True)
         
         # Build planning prompt with feedback if this is a refinement
         validation_section = ""
@@ -271,46 +403,58 @@ Revise the plan to fix these issues."""
         if feedback:
             user_input = f"Command: {command}\n\nAdditional feedback/context: {feedback}"
         
+        # Get available tools from state
+        available_tools = state.get("available_tools", [])
+        tools_info = self._format_tools_for_prompt(available_tools)
+        
         planning_prompt = f"""Task: {user_input}
 {validation_section}
 
-You have access to MCP tools via Zapier. Tool schemas are automatically available.
+CRITICAL: You are in PLANNING MODE. You can see available tools and their schemas below, but you MUST NOT execute any tools. Only use tool information to create a plan.
+
+{tools_info}
 
 CRITICAL: Include ALL intermediate steps. Example: "create meeting and send link" needs:
 1. Create meeting
 2. Get meeting link (from step 1 result)
 3. Send email with link
 
+IMPORTANT: Every step MUST have a tool_name. Do NOT create steps without tools (like "compose email" or "prepare message"). 
+- If you need to compose text, include it directly in the tool_args of the tool that will use it
+- All steps should execute a tool - there are no preparatory steps without tools
+- If a tool needs text content, provide it in the tool_args, don't create a separate step
+- Use exact tool names from the list above
+
 Each step should:
 - Be specific and actionable
 - Use one tool call
-- Reference exact tool name
+- Reference exact tool name from the available tools list above
 - Include intermediate steps (getting data from previous results)
+- ALWAYS have a tool_name (never null)
 
 Return JSON list with:
 - id: sequential number
 - description: specific step description
-- tool_name: exact tool name (or null)
+- tool_name: exact tool name (REQUIRED - never null, must match a tool from the list above)
 - tool_args: tool arguments (or null)
 - status: "pending"
 
 Example:
 [
-  {{"id": 1, "description": "Create calendar event for Tuesday 13:00", "tool_name": "create_calendar_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
-  {{"id": 2, "description": "Get meeting link from created event", "tool_name": "get_calendar_event_link", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
-  {{"id": 3, "description": "Send email with meeting link", "tool_name": "send_email", "tool_args": {{"to": "example@gmail.com", "body": "Link from step 2"}}, "status": "pending"}}
+  {{"id": 1, "description": "Create calendar event for Tuesday 13:00", "tool_name": "zapier_google_calendar_create_event", "tool_args": {{"date": "tuesday", "time": "13:00"}}, "status": "pending"}},
+  {{"id": 2, "description": "Get meeting link from created event", "tool_name": "zapier_google_calendar_get_event", "tool_args": {{"event_id": "from_step_1"}}, "status": "pending"}},
+  {{"id": 3, "description": "Send email with meeting link", "tool_name": "zapier_gmail_send_email", "tool_args": {{"to": "example@gmail.com", "body": "Link from step 2"}}, "status": "pending"}}
 ]
 
 Plan steps for: "{command}"
 """
         
-        response = self.client.beta.messages.create(
+        # Use regular messages API (no MCP) since we're providing tools in the prompt
+        response = self.client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=2000,
             system=system_prompt,
             messages=[{"role": "user", "content": planning_prompt}],
-            mcp_servers=self.mcp_servers,
-            betas=["mcp-client-2025-04-04"],
         )
         
         # Extract the plan from the response
@@ -430,6 +574,10 @@ Plan steps for: "{command}"
         # Update step status
         step["status"] = "in_progress"
         
+        # Check if this step has a tool to execute
+        tool_name = step.get("tool_name")
+        has_tool = tool_name and tool_name.strip()
+        
         # Get system prompt with app context
         app = state.get("app")
         system_prompt = self._get_system_prompt(app)
@@ -471,31 +619,65 @@ Plan steps for: "{command}"
             if context_parts:
                 context_str = f"\n\n=== CONTEXT FROM PREVIOUS STEPS ===\n{chr(10).join(context_parts)}\n=== END CONTEXT ===\n"
         
-        execution_prompt = f"""Execute: {step['description']}
+        # Build execution prompt based on whether step has a tool
+        if has_tool:
+            execution_prompt = f"""EXECUTE: {step['description']}
 
 {context_str}
 
+CRITICAL: You are in EXECUTION MODE. This step requires executing the tool: {tool_name}
+
 Instructions:
-- Use the tool specified in the plan (or appropriate tool if not specified)
-- Extract data from previous steps' structured output (e.g., htmlLink, hangoutLink, id)
+- Execute the tool: {tool_name}
+- Use the tool arguments from the plan: {json.dumps(step.get('tool_args', {}), indent=2)}
+- Extract data from previous steps' structured output (e.g., htmlLink, hangoutLink, id) if needed
 - Provide all required tool parameters
+- Execute the tool call now
 
 Response format:
 Summary: [what was done]
 Structured Output: [full JSON/structured data from tool]
 """
+        else:
+            # Step without tool - just provide a summary, no tool execution
+            execution_prompt = f"""Complete this step: {step['description']}
+
+{context_str}
+
+CRITICAL: This step does NOT require a tool execution. It is a preparatory or informational step.
+
+Instructions:
+- Provide a brief summary of what this step accomplishes
+- Do NOT call any tools
+- This step is likely preparing information for a subsequent tool-based step
+
+Response format:
+Summary: [brief description of what this step accomplishes]
+"""
         
         try:
-            response = self.client.beta.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=2000,
-                system=system_prompt,
-                messages=[
-                    {"role": "user", "content": execution_prompt}
-                ],
-                mcp_servers=self.mcp_servers,
-                betas=["mcp-client-2025-04-04"],
-            )
+            if has_tool:
+                # Use beta API with tools for steps that require tool execution
+                response = self.client.beta.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=2000,
+                    system=system_prompt,
+                    messages=[
+                        {"role": "user", "content": execution_prompt}
+                    ],
+                    mcp_servers=self.mcp_servers,
+                    betas=["mcp-client-2025-04-04"],
+                )
+            else:
+                # Use regular API without tools for steps that don't require tool execution
+                response = self.client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=500,
+                    system=system_prompt,
+                    messages=[
+                        {"role": "user", "content": execution_prompt}
+                    ],
+                )
             
             # Extract text summary from all text blocks
             result_text_parts = []
@@ -504,20 +686,22 @@ Structured Output: [full JSON/structured data from tool]
                     result_text_parts.append(block.text)
             result_text = "\n".join(result_text_parts) if result_text_parts else ""
             
-            # Try to extract structured output from the response
-            structured_output = self._extract_structured_output(response)
-            
-            # If we found structured output, also try to extract it from the text as fallback
-            if not structured_output and result_text:
-                # Look for JSON in the text (more comprehensive search)
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result_text, re.DOTALL)
-                if json_match:
-                    try:
-                        parsed = json.loads(json_match.group())
-                        if isinstance(parsed, dict) and len(parsed) > 0:
-                            structured_output = parsed
-                    except:
-                        pass
+            # Try to extract structured output from the response (only for tool-based steps)
+            structured_output = None
+            if has_tool:
+                structured_output = self._extract_structured_output(response)
+                
+                # If we found structured output, also try to extract it from the text as fallback
+                if not structured_output and result_text:
+                    # Look for JSON in the text (more comprehensive search)
+                    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            parsed = json.loads(json_match.group())
+                            if isinstance(parsed, dict) and len(parsed) > 0:
+                                structured_output = parsed
+                        except:
+                            pass
             
             # Store both summary and structured output
             step["result"] = result_text
@@ -543,8 +727,8 @@ Structured Output: [full JSON/structured data from tool]
             state["validation_feedback"] = "Plan is empty. Please create a plan with at least one step."
             return state
         
-        # Get system prompt with app context
-        system_prompt = self._get_system_prompt(app)
+        # Get system prompt with app context and planning mode restrictions
+        system_prompt = self._get_system_prompt(app, planning_mode=True)
         
         # Build validation prompt
         plan_summary = "\n".join([
@@ -556,10 +740,23 @@ Structured Output: [full JSON/structured data from tool]
         if feedback:
             user_input = f"Command: {command}\nAdditional feedback: {feedback}"
         
+        # Get available tools from state
+        available_tools = state.get("available_tools", [])
+        tools_info = self._format_tools_for_prompt(available_tools)
+        
         validation_prompt = f"""Review this plan for: "{user_input}"
 
 Plan:
 {plan_summary}
+
+CRITICAL: You are in VALIDATION MODE. You can see available tools and their schemas below to verify the plan uses correct tools, but you MUST NOT execute any tools. Only review and provide feedback.
+
+{tools_info}
+
+Use the tools list above to verify:
+- The tool names in the plan are correct (must match exactly)
+- The tool parameters make sense (check required fields)
+- The plan is logically sound
 
 Check for:
 1. Missing intermediate steps (e.g., getting a link after creating something)
@@ -567,6 +764,8 @@ Check for:
 3. Steps referencing data without showing how to get it
 4. Missing tool assignments
 5. Logical gaps
+6. Incorrect tool names (verify against available tools list above)
+7. Steps without tool_name (all steps must have a tool)
 
 If approved, respond: "APPROVED"
 
@@ -578,15 +777,14 @@ ISSUES FOUND:
 """
         
         try:
-            response = self.client.beta.messages.create(
+            # Use regular messages API (no MCP) since we're providing tools in the prompt
+            response = self.client.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=1500,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": validation_prompt}
                 ],
-                mcp_servers=self.mcp_servers,
-                betas=["mcp-client-2025-04-04"],
             )
             
             validation_result = response.content[0].text.strip()
@@ -673,13 +871,15 @@ ISSUES FOUND:
         workflow = StateGraph(AgentState)
         
         # Add nodes
+        workflow.add_node("fetch_tools", self.fetch_tools)
         workflow.add_node("summarize", self.summarize_command)
         workflow.add_node("plan", self.plan_phase)
         workflow.add_node("validate", self.validate_plan)
         workflow.add_node("execute", self.execute_phase)
         
-        # Define the flow: summarize -> plan -> validate -> (replan or execute) -> end
-        workflow.set_entry_point("summarize")
+        # Define the flow: fetch_tools -> summarize -> plan -> validate -> (replan or execute) -> end
+        workflow.set_entry_point("fetch_tools")
+        workflow.add_edge("fetch_tools", "summarize")
         workflow.add_edge("summarize", "plan")
         workflow.add_edge("plan", "validate")
         
@@ -716,20 +916,22 @@ ISSUES FOUND:
             "final_result": None,
             "execution_context": {},
             "validation_feedback": None,
-            "planning_iterations": 0
+            "planning_iterations": 0,
+            "available_tools": None  # Will be fetched in fetch_tools node
         }
         
-        # Run the graph - it will handle summarize -> plan -> validate -> (replan if needed) -> execute
+        # Run the graph - it will handle fetch_tools -> summarize -> plan -> validate -> (replan if needed) -> execute
         print("Running agent workflow...")
-        print("Phase 0: Summarizing command (if needed)...")
-        print("Phase 1: Planning and validation...")
+        print("Phase 0: Fetching available tools...")
+        print("Phase 1: Summarizing command (if needed)...")
+        print("Phase 2: Planning and validation...")
         state = self.graph.invoke(initial_state)
         
         print(f"\nFinal plan with {len(state['plan'])} steps:")
         for step in state["plan"]:
             print(f"  {step['id']}. {step['description']}")
         
-        print("\nPhase 2: Execution completed")
+        print("\nPhase 3: Execution completed")
         print("\nExecution Results:")
         for step in state["plan"]:
             status_icon = {
