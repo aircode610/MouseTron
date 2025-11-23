@@ -25,6 +25,7 @@ class AgentState(TypedDict):
     validation_feedback: Optional[str]  # Feedback from validation node
     planning_iterations: int  # Track how many times we've planned
     available_tools: Optional[List[Dict[str, Any]]]  # List of available tools with schemas
+    plan_from_tool_names: bool  # Whether plan was created directly from tool names
 
 
 class LangGraphAgent:
@@ -155,6 +156,246 @@ Do not include any text before or after the JSON array."""
             state["available_tools"] = []
         
         return state
+    
+    def _detect_tool_names_in_command(self, command: str, available_tools: List[Dict[str, Any]]) -> List[str]:
+        """Detect if command contains tool names and return them.
+        
+        Looks for:
+        1. Explicit tool name patterns (with or without zapier_ prefix)
+        2. Comma-separated tool lists
+        3. Tool names mentioned with "use", "run", "execute" keywords
+        
+        Note: Tool names in commands may not include the "zapier_" prefix,
+        but actual tool names do include it. This method handles both cases.
+        """
+        if not available_tools:
+            return []
+        
+        # Get all tool names (these include "zapier_" prefix)
+        tool_names = [tool.get("name", "") for tool in available_tools if tool.get("name")]
+        if not tool_names:
+            return []
+        
+        # Create mappings for flexible matching
+        # Map: tool name without prefix -> full tool name with prefix
+        tool_name_map = {}
+        tool_name_without_prefix_map = {}
+        for tool_name in tool_names:
+            tool_name_lower = tool_name.lower()
+            tool_name_map[tool_name_lower] = tool_name
+            
+            # Also create mapping without "zapier_" prefix
+            if tool_name_lower.startswith("zapier_"):
+                name_without_prefix = tool_name_lower[7:]  # Remove "zapier_"
+                tool_name_without_prefix_map[name_without_prefix] = tool_name
+        
+        command_lower = command.lower().strip()
+        found_tools = []
+        
+        # Method 1: Check for explicit tool name patterns (with or without zapier_ prefix)
+        import re
+        # Find all words that look like tool names (zapier_*, or just tool_name patterns)
+        tool_pattern = r'\b(zapier_\w+|\w+_\w+)\b'
+        potential_tools = re.findall(tool_pattern, command, re.IGNORECASE)
+        
+        # Check if any match actual tool names (with or without prefix)
+        for potential in potential_tools:
+            potential_lower = potential.lower()
+            
+            # Check exact match (with prefix)
+            if potential_lower in tool_name_map:
+                tool_name = tool_name_map[potential_lower]
+                if tool_name not in found_tools:
+                    found_tools.append(tool_name)
+                continue
+            
+            # Check match without prefix
+            if potential_lower in tool_name_without_prefix_map:
+                tool_name = tool_name_without_prefix_map[potential_lower]
+                if tool_name not in found_tools:
+                    found_tools.append(tool_name)
+                continue
+            
+            # Check if potential without "zapier_" prefix matches
+            if potential_lower.startswith("zapier_"):
+                potential_without_prefix = potential_lower[7:]
+                if potential_without_prefix in tool_name_without_prefix_map:
+                    tool_name = tool_name_without_prefix_map[potential_without_prefix]
+                    if tool_name not in found_tools:
+                        found_tools.append(tool_name)
+        
+        # Method 2: Check for comma-separated or space-separated tool lists
+        # Split by common separators and check each word
+        separators = [',', ' ', ' and ', ' & ', '|']
+        words = [command]
+        for sep in separators:
+            new_words = []
+            for word in words:
+                new_words.extend([w.strip() for w in word.split(sep) if w.strip()])
+            words = new_words
+        
+        for word in words:
+            word_lower = word.lower()
+            
+            # Check exact match (with prefix)
+            if word_lower in tool_name_map:
+                tool_name = tool_name_map[word_lower]
+                if tool_name not in found_tools:
+                    found_tools.append(tool_name)
+                continue
+            
+            # Check match without prefix
+            if word_lower in tool_name_without_prefix_map:
+                tool_name = tool_name_without_prefix_map[word_lower]
+                if tool_name not in found_tools:
+                    found_tools.append(tool_name)
+        
+        # Method 3: Check if command is primarily tool names
+        # If we found tools and command is short, likely it's a tool list
+        if found_tools and len(command.split()) <= len(found_tools) * 3:
+            # Command seems to be primarily about tools
+            return found_tools
+        
+        # Method 4: Check for explicit keywords like "use tool1 and tool2"
+        keywords = ['use', 'run', 'execute', 'call', 'invoke']
+        has_keyword = any(keyword in command_lower for keyword in keywords)
+        
+        if has_keyword and found_tools:
+            # If keywords are present and tools found, likely intentional
+            return found_tools
+        
+        # Only return if we found multiple tools or command is very short (likely tool list)
+        if len(found_tools) >= 2:
+            return found_tools
+        elif len(found_tools) == 1 and len(command.split()) <= 5:
+            # Single tool in short command might be intentional
+            return found_tools
+        
+        return []
+    
+    def _create_plan_from_tool_names(self, tool_names: List[str], command: str, feedback: Optional[str], available_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Create a plan directly from tool names, using feedback to customize arguments.
+        
+        Args:
+            tool_names: List of full tool names (with "zapier_" prefix) as returned by _detect_tool_names_in_command
+            command: The original command
+            feedback: User feedback/context
+            available_tools: List of available tool schemas
+        """
+        if not tool_names:
+            return []
+        
+        # Combine command and feedback for context
+        context = command
+        if feedback:
+            context = f"{command}\n\nFeedback: {feedback}"
+        
+        # Create a mapping of tool names to tool schemas
+        # Note: tool_names already include "zapier_" prefix, so they match available_tools
+        tools_map = {tool.get("name"): tool for tool in available_tools if tool.get("name")}
+        
+        # Build prompt to extract tool arguments from context
+        tools_info = ""
+        for i, tool_name in enumerate(tool_names, 1):
+            tool = tools_map.get(tool_name)
+            if tool:
+                description = tool.get("description", "")
+                input_schema = tool.get("inputSchema", {})
+                properties = input_schema.get("properties", {})
+                required = input_schema.get("required", [])
+                
+                tools_info += f"\n{i}. {tool_name}\n"
+                tools_info += f"   Description: {description}\n"
+                if properties:
+                    tools_info += f"   Parameters:\n"
+                    for param_name, param_info in properties.items():
+                        param_type = param_info.get("type", "string")
+                        param_desc = param_info.get("description", "")
+                        is_required = param_name in required
+                        req_marker = " (required)" if is_required else " (optional)"
+                        tools_info += f"     - {param_name} ({param_type}){req_marker}: {param_desc}\n"
+        
+        prompt = f"""You need to execute these tools in sequence: {', '.join(tool_names)}
+
+Context/Instructions:
+{context}
+
+Tool Information:
+{tools_info}
+
+For each tool, extract the appropriate arguments from the context above. Create a plan with one step per tool.
+
+Return a JSON array with this structure:
+[
+  {{
+    "id": 1,
+    "description": "Execute [tool_name] with extracted parameters",
+    "tool_name": "[exact_tool_name]",
+    "tool_args": {{"param1": "value1", "param2": "value2"}},
+    "status": "pending"
+  }},
+  ...
+]
+
+Important:
+- Use exact tool names as provided: {', '.join(tool_names)}
+- Extract parameter values from the context
+- If a parameter is not specified in context, use null or omit it
+- Maintain the order of tools as provided
+- Each tool should be a separate step"""
+        
+        try:
+            response = self.client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=3000,
+                system="You are a helpful assistant that creates execution plans from tool names and context. Return only valid JSON arrays.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            
+            # Extract JSON from response
+            text_content = ""
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
+                    text_content += block.text
+            
+            # Parse JSON
+            json_match = re.search(r'\[.*\]', text_content, re.DOTALL)
+            if json_match:
+                try:
+                    plan = json.loads(json_match.group())
+                    # Ensure all steps have status
+                    for step in plan:
+                        if "status" not in step:
+                            step["status"] = "pending"
+                    return plan
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Failed to parse plan JSON: {e}")
+            
+            # Fallback: create simple plan
+            plan = []
+            for i, tool_name in enumerate(tool_names, 1):
+                plan.append({
+                    "id": i,
+                    "description": f"Execute {tool_name}",
+                    "tool_name": tool_name,
+                    "tool_args": {},
+                    "status": "pending"
+                })
+            return plan
+            
+        except Exception as e:
+            print(f"Warning: Failed to create plan from tool names: {e}")
+            # Fallback: create simple plan
+            plan = []
+            for i, tool_name in enumerate(tool_names, 1):
+                plan.append({
+                    "id": i,
+                    "description": f"Execute {tool_name}",
+                    "tool_name": tool_name,
+                    "tool_args": {},
+                    "status": "pending"
+                })
+            return plan
     
     def _format_tools_for_prompt(self, tools: List[Dict[str, Any]]) -> str:
         """Format tools list into a readable string for prompts."""
@@ -384,6 +625,20 @@ Guidelines:
         command = state.get("command", "")
         feedback = state.get("feedback")
         app = state.get("app")
+        available_tools = state.get("available_tools", [])
+        
+        # Check if command contains tool names (only on first iteration, not replanning)
+        if iteration == 1 and not validation_feedback:
+            detected_tools = self._detect_tool_names_in_command(command, available_tools)
+            if detected_tools:
+                print(f"✓ Detected tool names in command: {', '.join(detected_tools)}")
+                print("Creating direct plan from tool names...")
+                plan = self._create_plan_from_tool_names(detected_tools, command, feedback, available_tools)
+                state["plan"] = plan
+                state["planning_iterations"] = iteration
+                state["plan_from_tool_names"] = True
+                print(f"✓ Created plan with {len(plan)} steps from tool names")
+                return state
         
         # Get system prompt with app context and planning mode restrictions
         system_prompt = self._get_system_prompt(app, planning_mode=True)
@@ -471,6 +726,7 @@ Plan steps for: "{command}"
                         step["status"] = "pending"
                 state["plan"] = steps_data
                 state["planning_iterations"] = iteration
+                state["plan_from_tool_names"] = False  # Normal planning, not from tool names
                 return state
             except Exception as e:
                 print(f"Error parsing JSON plan: {e}")
@@ -493,6 +749,7 @@ Plan steps for: "{command}"
         
         state["plan"] = steps if steps else [{"id": 1, "description": state["command"], "status": "pending", "tool_name": None, "tool_args": None}]
         state["planning_iterations"] = iteration
+        state["plan_from_tool_names"] = False  # Normal planning, not from tool names
         return state
     
     def _extract_tool_results(self, response) -> Dict[str, Any]:
@@ -722,9 +979,23 @@ Summary: [brief description of what this step accomplishes]
         command = state.get("command", "")
         feedback = state.get("feedback")
         app = state.get("app")
+        plan_from_tool_names = state.get("plan_from_tool_names", False)
         
         if not plan:
             state["validation_feedback"] = "Plan is empty. Please create a plan with at least one step."
+            return state
+        
+        # If plan was created from explicit tool names, be more lenient in validation
+        if plan_from_tool_names:
+            print("✓ Plan created from tool names - using lenient validation")
+            # Only check for critical issues
+            has_all_tools = all(step.get("tool_name") for step in plan)
+            if not has_all_tools:
+                state["validation_feedback"] = "Some steps are missing tool names. All steps must have a tool_name."
+                return state
+            # Approve if all steps have tools
+            state["validation_feedback"] = None
+            print("✓ Tool-name-based plan validated")
             return state
         
         # Get system prompt with app context and planning mode restrictions
@@ -917,7 +1188,8 @@ ISSUES FOUND:
             "execution_context": {},
             "validation_feedback": None,
             "planning_iterations": 0,
-            "available_tools": None  # Will be fetched in fetch_tools node
+            "available_tools": None,  # Will be fetched in fetch_tools node
+            "plan_from_tool_names": False  # Will be set to True if plan is created from tool names
         }
         
         # Run the graph - it will handle fetch_tools -> summarize -> plan -> validate -> (replan if needed) -> execute

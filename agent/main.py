@@ -7,9 +7,9 @@ def main():
     # Example: Simulating data from Logitech plugin
     # In real usage, this would come from the plugin
     command_data = {
-        "command": """ send an email with "what's up" content to aircode610@gmail.com
+        "command": """ zapier_tavily_search gmail_send_email
         """,
-        "feedback": "add subject 'not much'",  # User's additional feedback
+        "feedback": "interesting facts about munich",  # User's additional feedback
         "app": "Chrome"  # App where the text was selected
     }
     
