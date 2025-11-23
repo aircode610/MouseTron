@@ -244,7 +244,7 @@ class EMA:
     
     def pick_from_frequency(self, n=None):
         """
-        Pick n most stable subsequences from frequency table (outside recent k blocks).
+        Pick n most stable subsequences from frequency table (can include recent k blocks).
         Sorted by frequency * length to prioritize longer subsequences.
         Uses estimation function for eviction, but picks by frequency * length score.
         If n is None, uses self.nf.
@@ -252,27 +252,25 @@ class EMA:
         if n is None:
             n = self.nf
         
+        # Update frequency table first to ensure it's current
+        self._update_frequency_table()
+        
+        # Evict entries if frequency table exceeds max size t
+        if len(self.frequency_table) > self.t:
+            self._evict_from_frequency_table()
+        
         if not self.frequency_table:
             return []
         
-        # Get all subsequences from recent k blocks (to exclude them)
-        recent_subseq_set = set()
-        for subsequences in self.recent_subsequences:
-            recent_subseq_set.update(subsequences)
+        # Use all items from frequency table (no filtering - can include recent k blocks)
+        all_items = list(self.frequency_table.items())
         
-        # Filter to only subsequences NOT in recent k blocks (stable patterns)
-        filtered_items = [
-            (subsequence, data) 
-            for subsequence, data in self.frequency_table.items()
-            if subsequence not in recent_subseq_set
-        ]
-        
-        if not filtered_items:
+        if not all_items:
             return []
         
         # Sort by frequency * length (descending), then by subsequence (for consistency)
         sorted_items = sorted(
-            filtered_items,
+            all_items,
             key=lambda x: (-x[1]['frequency'] * len(x[0]), x[0])  # frequency * length
         )
         

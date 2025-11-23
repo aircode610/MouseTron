@@ -6,9 +6,5 @@
   {
     "tool_name": "github_create_pull_request",
     "description": "Create a new pull request and merge it (optional)."
-  },
-  {
-    "tool_name": "slack_send_channel_message",
-    "description": "Post a message or thread reply to a channel. You can also schedule it to send later."
   }
 ]
