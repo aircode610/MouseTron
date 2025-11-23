@@ -113,49 +113,212 @@ Do not include any text before or after the JSON array."""
                 betas=["mcp-client-2025-04-04"],
             )
             
-            # Extract text response
+            # Method 1: Try to extract tools directly from MCP response blocks
+            # Check if response has tool_use blocks with tool definitions
+            tools = []
+            for block in response.content:
+                if hasattr(block, 'type') and block.type == 'tool_use':
+                    tool_name = getattr(block, 'name', '')
+                    tool_input = getattr(block, 'input', {})
+                    if tool_name:
+                        tool_info = {
+                            "name": tool_name,
+                            "description": f"Tool: {tool_name}",
+                            "inputSchema": tool_input if isinstance(tool_input, dict) else {}
+                        }
+                        tools.append(tool_info)
+            
+            if tools:
+                state["available_tools"] = tools
+                print(f"✓ Extracted {len(tools)} tools from MCP response blocks")
+                return state
+            
+            # Method 2: Try to parse JSON from text response
             text_content = ""
             for block in response.content:
                 if hasattr(block, 'type') and block.type == 'text' and hasattr(block, 'text'):
                     text_content += block.text
             
-            # Try to parse JSON from response
-            json_match = re.search(r'\[.*\]', text_content, re.DOTALL)
-            if json_match:
-                try:
-                    tools = json.loads(json_match.group())
+            if text_content:
+                # Try multiple JSON extraction strategies
+                tools = self._extract_tools_from_text(text_content)
+                if tools:
                     state["available_tools"] = tools
-                    print(f"✓ Fetched {len(tools)} tools")
+                    print(f"✓ Extracted {len(tools)} tools from text response")
                     return state
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Failed to parse tools JSON: {e}")
             
-            # Fallback: try to extract tool information from text
-            # Look for tool use blocks in the response
-            tools = []
-            for block in response.content:
-                if hasattr(block, 'type') and block.type == 'tool_use':
-                    tool_info = {
-                        "name": getattr(block, 'name', ''),
-                        "description": f"Tool: {getattr(block, 'name', '')}",
-                        "inputSchema": getattr(block, 'input', {})
-                    }
-                    tools.append(tool_info)
-            
+            # If we can't extract tools, try loading from saved file
+            print("⚠ Could not extract tools from MCP response, trying to load from saved file...")
+            tools = self._load_tools_from_file()
             if tools:
                 state["available_tools"] = tools
-                print(f"✓ Extracted {len(tools)} tools from response")
+                print(f"✓ Loaded {len(tools)} tools from saved file")
                 return state
             
-            # If we can't extract tools, create a minimal list
-            print("⚠ Could not extract tools from response, using empty list")
+            # Last resort: empty list
+            print("⚠ Could not load tools from any source, using empty list")
             state["available_tools"] = []
             
         except Exception as e:
-            print(f"Warning: Failed to fetch tools: {e}. Continuing without tool list.")
-            state["available_tools"] = []
+            print(f"Warning: Failed to fetch tools: {e}. Trying to load from saved file...")
+            tools = self._load_tools_from_file()
+            if tools:
+                state["available_tools"] = tools
+                print(f"✓ Loaded {len(tools)} tools from saved file")
+            else:
+                print("⚠ Could not load tools from any source, using empty list")
+                state["available_tools"] = []
         
         return state
+    
+    def _load_tools_from_file(self) -> List[Dict[str, Any]]:
+        """Load tools from saved JSON file as fallback."""
+        # Try to find the tools file in common locations
+        possible_paths = [
+            os.path.join("dataset", "zapier_tools_simplified.json"),
+            os.path.join("dataset", "zapier_tools.json"),
+            "zapier_tools_simplified.json",
+            "zapier_tools.json",
+        ]
+        
+        for file_path in possible_paths:
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        tools = json.load(f)
+                        if isinstance(tools, list) and len(tools) > 0:
+                            # Ensure tools have the expected structure
+                            formatted_tools = []
+                            for tool in tools:
+                                if isinstance(tool, dict) and tool.get("name"):
+                                    formatted_tools.append({
+                                        "name": tool.get("name"),
+                                        "description": tool.get("description", ""),
+                                        "inputSchema": tool.get("inputSchema", {})
+                                    })
+                            if formatted_tools:
+                                return formatted_tools
+                except Exception as e:
+                    print(f"Warning: Failed to load tools from {file_path}: {e}")
+                    continue
+        
+        return []
+    
+    def _extract_tools_from_text(self, text_content: str) -> List[Dict[str, Any]]:
+        """Extract tools from text content with robust JSON parsing."""
+        tools = []
+        
+        # Strategy 1: Try to find and parse JSON array directly
+        # Look for JSON array pattern (more flexible)
+        json_patterns = [
+            r'\[\s*\{.*?\}\s*\]',  # Simple array
+            r'\[.*?\]',  # Any array (greedy)
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.finditer(pattern, text_content, re.DOTALL)
+            for match in matches:
+                json_str = match.group()
+                try:
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        # Validate that it looks like tools
+                        if all(isinstance(item, dict) and 'name' in item for item in parsed):
+                            return parsed
+                except json.JSONDecodeError:
+                    # Try to fix common JSON issues
+                    fixed_json = self._fix_json_common_issues(json_str)
+                    if fixed_json:
+                        try:
+                            parsed = json.loads(fixed_json)
+                            if isinstance(parsed, list) and len(parsed) > 0:
+                                if all(isinstance(item, dict) and 'name' in item for item in parsed):
+                                    return parsed
+                        except json.JSONDecodeError:
+                            continue
+        
+        # Strategy 2: Try to extract individual tool objects
+        # Look for individual JSON objects that look like tools
+        tool_object_pattern = r'\{[^{}]*"name"[^{}]*\}'
+        matches = re.finditer(tool_object_pattern, text_content, re.DOTALL)
+        for match in matches:
+            json_str = match.group()
+            try:
+                tool_obj = json.loads(json_str)
+                if isinstance(tool_obj, dict) and 'name' in tool_obj:
+                    tools.append(tool_obj)
+            except json.JSONDecodeError:
+                # Try fixed version
+                fixed_json = self._fix_json_common_issues(json_str)
+                if fixed_json:
+                    try:
+                        tool_obj = json.loads(fixed_json)
+                        if isinstance(tool_obj, dict) and 'name' in tool_obj:
+                            tools.append(tool_obj)
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Strategy 3: Try to find JSON array with more lenient matching
+        # Look for content between first [ and last ]
+        first_bracket = text_content.find('[')
+        last_bracket = text_content.rfind(']')
+        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+            json_str = text_content[first_bracket:last_bracket + 1]
+            try:
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    if all(isinstance(item, dict) and 'name' in item for item in parsed):
+                        return parsed
+            except json.JSONDecodeError:
+                # Try fixed version
+                fixed_json = self._fix_json_common_issues(json_str)
+                if fixed_json:
+                    try:
+                        parsed = json.loads(fixed_json)
+                        if isinstance(parsed, list) and len(parsed) > 0:
+                            if all(isinstance(item, dict) and 'name' in item for item in parsed):
+                                return parsed
+                    except json.JSONDecodeError:
+                        pass
+        
+        return tools if tools else []
+    
+    def _fix_json_common_issues(self, json_str: str) -> Optional[str]:
+        """Try to fix common JSON issues like trailing commas, unclosed brackets, etc."""
+        if not json_str:
+            return None
+        
+        try:
+            # Try parsing as-is first
+            json.loads(json_str)
+            return json_str
+        except json.JSONDecodeError:
+            pass
+        
+        fixed = json_str
+        
+        # Fix trailing commas before closing brackets/braces
+        fixed = re.sub(r',\s*\]', ']', fixed)
+        fixed = re.sub(r',\s*\}', '}', fixed)
+        
+        # Try to close unclosed brackets/braces (simple cases)
+        open_brackets = fixed.count('[') - fixed.count(']')
+        open_braces = fixed.count('{') - fixed.count('}')
+        
+        if open_brackets > 0:
+            fixed += ']' * open_brackets
+        if open_braces > 0:
+            fixed += '}' * open_braces
+        
+        # Remove control characters that might break JSON
+        fixed = ''.join(char for char in fixed if ord(char) >= 32 or char in '\n\r\t')
+        
+        try:
+            # Validate the fixed JSON
+            json.loads(fixed)
+            return fixed
+        except json.JSONDecodeError:
+            return None
     
     def _detect_tool_names_in_command(self, command: str, available_tools: List[Dict[str, Any]]) -> List[str]:
         """Detect if command contains tool names and return them.
